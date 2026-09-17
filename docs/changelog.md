@@ -2,6 +2,16 @@
 
 记录系统近期面向用户的功能更新、体验优化和问题修复。
 
+## v0.1.75 - 2026-09-17
+
+### 中文
+
+- 修复跨平台发行校验在非 Windows 构建环境中错误判断 PowerShell 路径的问题，确保新版本可稳定通过发布验证；Windows 打开运行日志目录的功能保持不变。
+
+### English
+
+- Fixed cross-platform release validation incorrectly interpreting the PowerShell path in non-Windows build environments, allowing the release to pass verification reliably while leaving the Windows runtime-log folder action unchanged.
+
 ## v0.1.74 - 2026-09-17
 
 ### 中文

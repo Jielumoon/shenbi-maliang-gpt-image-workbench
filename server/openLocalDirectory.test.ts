@@ -5,7 +5,7 @@ import { localDirectoryOpenCommand } from "./openLocalDirectory";
 describe("local directory opener", () => {
   test("opens the exact resolved directory with Windows Explorer arguments", () => {
     const result = localDirectoryOpenCommand("data/logs", "win32", 1234);
-    expect(result.candidates[0].toLowerCase()).toEndWith("\\powershell.exe");
+    expect(result.candidates[0].replaceAll("\\", "/").toLowerCase()).toEndWith("/powershell.exe");
     expect(result.environment.GPT_IMAGE_LOG_DIRECTORY).toBe(path.resolve("data/logs"));
     expect(result.environment.GPT_IMAGE_SERVER_PID).toBe("1234");
     expect(result.args.join(" ")).toContain("SessionId");

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   INHERITED_TRANSPARENT_BACKGROUND_PROMPT_INSTRUCTION,
   OPAQUE_BACKGROUND_PROMPT_INSTRUCTION,
+  REMOVE_IMAGE_BACKGROUND_PROMPT,
   TRANSPARENT_BACKGROUND_PROMPT_INSTRUCTION,
   inheritSourceImageBackgroundOptions,
   imageEditPromptRequestsNonTransparentBackground,
@@ -13,6 +14,12 @@ import {
 } from "./imageBackground";
 
 describe("image background options", () => {
+  test("keeps the one-click background removal prompt fixed", () => {
+    expect(REMOVE_IMAGE_BACKGROUND_PROMPT).toBe(
+      "移除此图像的背景。保持所有前景主体不变且完整无损，边缘干净平滑。将背景设为透明。"
+    );
+  });
+
   test("normalizes supported values and falls back to auto", () => {
     expect(normalizeImageBackgroundOption(" TRANSPARENT ")).toBe("transparent");
     expect(normalizeImageBackgroundOption("opaque")).toBe("opaque");

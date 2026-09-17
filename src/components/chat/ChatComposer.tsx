@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEventHandler, type CSSProperties, type RefObject } from "react";
-import { ArrowUp, BrushCleaning, ImageIcon, Lightbulb, LoaderCircle, Plus, RotateCw, Sparkles, Square, Undo2, WandSparkles, X } from "lucide-react";
+import { ArrowUp, Brush, BrushCleaning, ImageIcon, Lightbulb, LoaderCircle, Maximize2, Minimize2, Plus, RotateCw, Sparkles, Square, Undo2, WandSparkles, X } from "lucide-react";
 import { ImageLightbox, type ImageLightboxState } from "../ImageLightbox";
 import { MaterialPickerDrawer } from "../MaterialPicker";
-import { BackgroundPicker, ImageCountStepper, SizePicker } from "../ImageOptionPickers";
+import { BackgroundPicker, ImageCountStepper, ModelPicker, QualityPicker, SizePicker } from "../ImageOptionPickers";
 import { CheckerboardImage } from "../CheckerboardImage";
 import { PromptColorSchemeSelect } from "../PromptColorSchemeSelect";
 import { PromptOptimizeStyleSelect } from "../PromptOptimizeStyleSelect";
@@ -25,14 +25,18 @@ import {
   type PromptOptimizeStyleGroup
 } from "../../lib/promptOptimizeStyles";
 import { useI18n } from "../../i18n";
-import type { SizeOption } from "../../lib/imageOptions";
+import type { QualityOption, SizeOption } from "../../lib/imageOptions";
 import type { ImageBackgroundOption } from "../../lib/imageBackground";
+import type { ImageModelId, ImageQuality } from "../../lib/imageModels";
+import { shouldSubmitComposerOnEnter } from "../../lib/editorInput";
 import type { ComposerPromptTemplateDraft, ComposerPromptTemplatePanelDraft } from "../../store/workbench";
 import type { AssetItem, CaseMaterialItem, ImageEditSuggestion } from "../../types";
 import { useToast } from "../../ui";
+import { useComposerTextareaAutosize } from "../../hooks/useComposerTextareaAutosize";
+import { useFloatingComposerExpansion } from "../../hooks/useFloatingComposerExpansion";
 
 type QuickMenuSource = "plus" | "slash";
-const QUICK_MENU_ITEM_COUNT = 3;
+const QUICK_MENU_ITEM_COUNT = 4;
 const PROMPT_INPUT_OPTIMIZE_STYLE_STORAGE_KEY = "gpt-image.prompt-input-optimize-style";
 
 export type ChatComposerPreview = {
@@ -41,6 +45,8 @@ export type ChatComposerPreview = {
   previewUrl?: string;
   name: string;
   title: string;
+  openLabel?: string;
+  onOpen?: () => void;
   onRemove: () => void;
 };
 
@@ -58,6 +64,9 @@ type ChatComposerProps = {
   placeholder: string;
   previews: ChatComposerPreview[];
   imageCount: number;
+  imageModel: ImageModelId;
+  quality: ImageQuality;
+  qualityOptions: QualityOption[];
   background: ImageBackgroundOption;
   promptColorSchemes: PromptColorScheme[];
   promptColorSchemeIds: string[];
@@ -77,12 +86,15 @@ type ChatComposerProps = {
   onAutoOptimizePromptRequestHandled?: (id: number) => void;
   onBackgroundChange: (value: ImageBackgroundOption) => void;
   onImageCountChange: (value: number) => void;
+  onImageModelChange: (value: ImageModelId) => void;
+  onQualityChange: (value: ImageQuality) => void;
   onPaste: ClipboardEventHandler<HTMLTextAreaElement>;
   onSelectedAssetsChange: (assets: AssetItem[]) => void;
   onSelectedCaseMaterialsChange: (caseMaterials: CaseMaterialItem[]) => void;
   onSizeChange: (value: string) => void;
   onSubmit: () => void;
   onToggleAsset: (asset: AssetItem) => void;
+  onOpenDrawing: () => void;
   onOpenCasePicker: () => void;
   onToggleMaterialPicker: () => void;
   onPromptColorSchemeChange?: (state: { ids: string[]; injection: string; prompt: string }) => void;
@@ -146,6 +158,9 @@ export function ChatComposer({
   placeholder,
   previews,
   imageCount,
+  imageModel,
+  quality,
+  qualityOptions,
   background,
   promptColorSchemes,
   promptColorSchemeIds,
@@ -165,12 +180,15 @@ export function ChatComposer({
   onAutoOptimizePromptRequestHandled,
   onBackgroundChange,
   onImageCountChange,
+  onImageModelChange,
+  onQualityChange,
   onPaste,
   onSelectedAssetsChange,
   onSelectedCaseMaterialsChange,
   onSizeChange,
   onSubmit,
   onToggleAsset,
+  onOpenDrawing,
   onOpenCasePicker,
   onToggleMaterialPicker,
   onPromptColorSchemeChange,
@@ -199,6 +217,7 @@ export function ChatComposer({
   const { showToast } = useToast();
   const { t } = useI18n();
   const quickMenuRef = useRef<HTMLDivElement | null>(null);
+  const composerFormRef = useRef<HTMLFormElement | null>(null);
   const slashTriggerRef = useRef<{ index: number } | null>(null);
   const promptTemplateLoadingRef = useRef(false);
   const promptTemplateStreamedRef = useRef(false);
@@ -223,6 +242,19 @@ export function ChatComposer({
   const hasClearableInput = hasDraftPrompt || hasSelectedMaterials;
   const clearInputLabel = hasSelectedMaterials ? t("composer.clearInputWithAssets") : t("composer.clearInput");
   const visibleEditSuggestions = editSuggestions.slice(0, 3);
+  const {
+    collapsedHeight: inputCollapsedHeight,
+    expanded: inputExpanded,
+    style: inputExpansionStyle,
+    toggle: toggleInputExpansion
+  } = useFloatingComposerExpansion({ formRef: composerFormRef, textareaRef });
+  const { collapsedHeight: inputCollapsedTextareaHeight, expandable: inputExpandable } = useComposerTextareaAutosize({
+    draftPrompt,
+    expanded: inputExpanded,
+    previewCount: previews.length,
+    textareaRef
+  });
+
   const showEditSuggestions = editSuggestionsLoading || visibleEditSuggestions.length > 0;
   const previewItems = previews.map((preview) => ({
     url: preview.previewUrl ?? preview.url,
@@ -455,7 +487,11 @@ export function ChatComposer({
       openCasePickerFromMenu();
       return;
     }
-    openPromptTemplateFromMenu();
+    if (quickMenuActiveIndex === 2) {
+      openPromptTemplateFromMenu();
+      return;
+    }
+    openDrawingFromMenu();
   }
 
   function stopPromptTemplateTyping() {
@@ -519,6 +555,12 @@ export function ChatComposer({
   function openMaterialPickerFromMenu() {
     selectQuickMenuItem();
     toggleMaterialPickerWithMotion();
+  }
+
+  function openDrawingFromMenu() {
+    selectQuickMenuItem();
+    if (materialPickerOpen) closeMaterialPickerWithMotion();
+    onOpenDrawing();
   }
 
   function openCasePickerFromMenu() {
@@ -782,8 +824,18 @@ export function ChatComposer({
         />
       ) : null}
       {!promptTemplateOpen ? editSuggestionStrip : null}
+      {inputExpanded && inputCollapsedHeight > 0 ? (
+        <div className="composer-expansion-placeholder" style={{ height: inputCollapsedHeight }} aria-hidden="true" />
+      ) : null}
       <form
-        className={cx("composer", previews.length > 0 && "has-preview", quickMenuOpen && "quick-menu-open")}
+        ref={composerFormRef}
+        className={cx(
+          "composer",
+          previews.length > 0 && "has-preview",
+          quickMenuOpen && "quick-menu-open",
+          inputExpanded && "input-expanded"
+        )}
+        style={inputExpansionStyle}
         onSubmit={(event) => {
           event.preventDefault();
           submitPrompt();
@@ -796,8 +848,8 @@ export function ChatComposer({
                 <button
                   type="button"
                   className="composer-preview-open"
-                  onClick={() => setPreviewState({ items: previewItems, index })}
-                  aria-label={t("composer.previewNamed", { name: preview.name })}
+                  onClick={() => preview.onOpen ? preview.onOpen() : setPreviewState({ items: previewItems, index })}
+                  aria-label={preview.openLabel ?? t("composer.previewNamed", { name: preview.name })}
                 >
                   <CheckerboardImage src={preview.url} alt={preview.name} />
                 </button>
@@ -827,13 +879,25 @@ export function ChatComposer({
                 insertSlashAndOpenQuickMenu(event.currentTarget);
                 return;
               }
-              if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+              if (!shouldSubmitComposerOnEnter(event.key, event.shiftKey, event.nativeEvent.isComposing)) return;
               event.preventDefault();
               submitPrompt();
             }}
             placeholder={placeholder}
             rows={1}
           />
+          {inputExpandable || inputExpanded ? (
+            <button
+              type="button"
+              className="composer-input-expand-btn"
+              onClick={() => void toggleInputExpansion(inputCollapsedTextareaHeight)}
+              aria-label={t(inputExpanded ? "composer.inputCollapse" : "composer.inputExpand")}
+              aria-expanded={inputExpanded}
+              title={t(inputExpanded ? "composer.inputCollapse" : "composer.inputExpand")}
+            >
+              {inputExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            </button>
+          ) : null}
           {promptTextareaLoading ? (
             <div className="composer-textarea-skeleton" aria-hidden="true">
               <span />
@@ -897,9 +961,23 @@ export function ChatComposer({
                   <Sparkles size={17} />
                   <strong>{t("composer.promptTemplates")}</strong>
                 </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={cx(quickMenuActiveIndex === 3 && "active")}
+                  aria-current={quickMenuActiveIndex === 3 ? "true" : undefined}
+                  onMouseEnter={() => setQuickMenuActiveIndex(3)}
+                  onFocus={() => setQuickMenuActiveIndex(3)}
+                  onClick={openDrawingFromMenu}
+                >
+                  <Brush size={17} />
+                  <strong>{t("composer.drawing")}</strong>
+                </button>
               </div>
             ) : null}
           </div>
+          <ModelPicker value={imageModel} onChange={onImageModelChange} />
+          <QualityPicker value={quality} options={qualityOptions} onChange={(value) => onQualityChange(value as ImageQuality)} />
           <SizePicker value={size} options={sizeOptions} onChange={onSizeChange} />
           <BackgroundPicker value={background} onChange={onBackgroundChange} />
           <ImageCountStepper value={imageCount} onChange={onImageCountChange} />
@@ -921,17 +999,6 @@ export function ChatComposer({
             {!promptTemplateOptimizeControlVisible ? (
               <>
                 <div className="composer-prompt-template-optimize-control is-default" aria-label={t("composer.optimizeOptions")}>
-                  <button
-                    type="button"
-                    className="secondary-btn icon-only-btn composer-prompt-template-optimize-submit"
-                    disabled={promptInputOptimizePending || !draftPrompt.trim()}
-                    onClick={() => optimizeCurrentPrompt()}
-                    aria-label={draftPrompt.trim() ? t("composer.optimizeInput", { style: optimizeStyleOption.label }) : t("composer.optimizeDisabled")}
-                    title={draftPrompt.trim() ? t("composer.optimizeInput", { style: optimizeStyleOption.label }) : t("composer.optimizeDisabled")}
-                    data-tooltip={t("composer.optimizeTooltip")}
-                  >
-                    {promptInputOptimizePending ? <RotateCw size={15} className="spin" /> : <WandSparkles size={15} />}
-                  </button>
                   {promptBeforeInputOptimize ? (
                     <button
                       type="button"
@@ -944,7 +1011,19 @@ export function ChatComposer({
                     >
                       <Undo2 size={15} />
                     </button>
-                  ) : null}
+                  ) : (
+                    <button
+                      type="button"
+                      className="secondary-btn icon-only-btn composer-prompt-template-optimize-submit"
+                      disabled={promptInputOptimizePending || !draftPrompt.trim()}
+                      onClick={() => optimizeCurrentPrompt()}
+                      aria-label={draftPrompt.trim() ? t("composer.optimizeInput", { style: optimizeStyleOption.label }) : t("composer.optimizeDisabled")}
+                      title={draftPrompt.trim() ? t("composer.optimizeInput", { style: optimizeStyleOption.label }) : t("composer.optimizeDisabled")}
+                      data-tooltip={t("composer.optimizeTooltip")}
+                    >
+                      {promptInputOptimizePending ? <RotateCw size={15} className="spin" /> : <WandSparkles size={15} />}
+                    </button>
+                  )}
                   <span className="composer-prompt-template-style-tooltip" data-tooltip={t("settings.personalization.promptStyles.title")}>
                     <PromptOptimizeStyleSelect
                       value={promptInputOptimizeStyle}

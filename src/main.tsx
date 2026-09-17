@@ -6,6 +6,7 @@ import App from "./App";
 import ConfigApp from "./ConfigApp";
 import { I18nProvider } from "./i18n";
 import { clearPromptTemplateFormDraftCache } from "./lib/promptTemplateDraftCache";
+import { installRuntimeErrorReporting, reportRuntimeClientError } from "./lib/runtimeErrorReporter";
 import "./styles.css";
 import "./styles/login.css";
 import "./styles/shared-ui.css";
@@ -13,10 +14,12 @@ import "./styles/search-history.css";
 import "./styles/app-shell.css";
 import "./styles/chat-messages.css";
 import "./styles/image-editor.css";
+import "./styles/drawing-canvas.css";
 import "./styles/starter-composer.css";
 import "./styles/material-picker.css";
 import "./styles/overlays.css";
 import "./styles/pages.css";
+import "./styles/more-tools.css";
 import "./styles/cards-timeline.css";
 import "./styles/image-preview.css";
 import "./styles/asset-library.css";
@@ -29,6 +32,7 @@ import "./styles/appearance.css";
 import "./styles/rtl.css";
 
 clearPromptTemplateFormDraftCache();
+installRuntimeErrorReporting();
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -42,7 +46,11 @@ const queryClient = new QueryClient({
 const baseUrl = import.meta.env.BASE_URL || "/";
 const routerBasename = baseUrl === "/" ? undefined : baseUrl.replace(/\/$/, "");
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
+ReactDOM.createRoot(document.getElementById("root")!, {
+  onUncaughtError: (error, errorInfo) => reportRuntimeClientError("react_uncaught", error, errorInfo.componentStack ?? ""),
+  onCaughtError: (error, errorInfo) => reportRuntimeClientError("react_caught", error, errorInfo.componentStack ?? ""),
+  onRecoverableError: (error, errorInfo) => reportRuntimeClientError("react_recoverable", error, errorInfo.componentStack ?? "")
+}).render(
   <React.StrictMode>
     <I18nProvider>
       <QueryClientProvider client={queryClient}>

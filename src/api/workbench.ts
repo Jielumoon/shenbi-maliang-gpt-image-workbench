@@ -47,6 +47,7 @@ import type {
 } from "../types";
 import type { ImageAnnotation, ImageEditIntent } from "../lib/imageAnnotations";
 import type { ImageBackgroundOption, TransparentImageOutputFormat } from "../lib/imageBackground";
+import type { ImageModelId, ImageQuality } from "../lib/imageModels";
 import { ApiError, request } from "./client";
 import type { AppearanceMode } from "../lib/appearance";
 import type { PromptColorScheme, PromptColorSchemePayload } from "../lib/promptColorSchemes";
@@ -99,14 +100,38 @@ export type AiClientInstallLinks = {
   };
 };
 
+export type ImageProvenanceCapabilities = {
+  configured: boolean;
+  provider: "openai";
+  acceptedMimeTypes: string[];
+  maxFileBytes: number;
+};
+
+export type ImageProvenanceSignal = {
+  type: "c2pa" | "synthid";
+  outcome: "detected" | "not_detected";
+  validationState: "trusted" | "valid" | "invalid" | "not_present" | null;
+  issuer: string | null;
+  model: string | null;
+  generatedAt: string | null;
+};
+
+export type ImageProvenanceCheckResult = {
+  object: "content_provenance_check";
+  createdAt: number;
+  detected: boolean;
+  results: ImageProvenanceSignal[];
+};
+
 export type GenerateImagePayload = {
   clientRequestId: string;
   sessionId?: string;
   providerId?: string;
   prompt: string;
   language?: string;
+  model?: ImageModelId;
   size?: string;
-  quality?: string;
+  quality?: ImageQuality;
   n?: number;
   background?: ImageBackgroundOption;
   outputFormat?: TransparentImageOutputFormat;
@@ -126,6 +151,7 @@ export type EditImagePayload = GenerateImagePayload & {
   sourceCaseItemIds?: string[];
   sourceReferenceIds?: string[];
   sourceInlineImages?: Array<{ id?: string; name?: string; dataUrl: string }>;
+  imageMarkupReference?: boolean;
   referenceAssetId?: string;
   maskDataUrl?: string;
   editIntent?: ImageEditIntent;
@@ -612,6 +638,16 @@ export type ExternalMcpConnection = {
 
 export const api = {
   me: () => request<{ user: User | null }>("/api/auth/me"),
+  imageProvenanceCapabilities: () =>
+    request<ImageProvenanceCapabilities>("/api/image-provenance/capabilities"),
+  checkImageProvenance: (file: File) => {
+    const body = new FormData();
+    body.append("file", file, file.name);
+    return request<ImageProvenanceCheckResult>("/api/image-provenance/check", {
+      method: "POST",
+      body
+    });
+  },
   aiClientInstallLinks: () => request<AiClientInstallLinks>("/ai-client-install/links.json"),
   externalMcpConnections: () => request<{
     resource: string;

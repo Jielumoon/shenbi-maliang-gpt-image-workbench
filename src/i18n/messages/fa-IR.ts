@@ -1297,7 +1297,7 @@ const messages: Messages = {
   "chatMessages.unknownTime": "زمان نامشخص",
   "chatMessages.todayTime": "امروز، {time}",
   "chatMessages.dateTime": "{date}، {time}",
-  "chatMessages.messageTime": "زمان پیام",
+  "chatMessages.messageTime": "زمان",
   "chatMessages.originalMaterials": "منابع اصلی",
   "chatMessages.copy": "کپی",
   "chatMessages.editMessage": "ویرایش پیام",

@@ -28,7 +28,7 @@
   display: flex;
   flex-direction: column;
   gap: 0;
-  background: #f9f9f9;
+  background: var(--app-sidebar-bg);
   border-right: 1px solid #ededed;
   padding: 0 var(--sidebar-pad-x);
   font-size: 14px;
@@ -48,7 +48,7 @@
   gap: 12px;
   margin: 0;
   padding: var(--sidebar-pad-y) var(--sidebar-pad-x) 0;
-  background: #f9f9f9;
+  background: var(--app-sidebar-bg);
 }
 
 .sidebar-main-scroll {
@@ -1317,7 +1317,7 @@
 
 .content {
   min-width: 0;
-  background: #fff;
+  background: var(--app-bg);
 }
 
 .page-route-stage,

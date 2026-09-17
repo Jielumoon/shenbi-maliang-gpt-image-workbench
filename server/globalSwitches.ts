@@ -13,7 +13,8 @@ export const GLOBAL_SWITCH_TYPES = [
   "cpa_sync",
   "github_entry",
   "ai_client_install_entry",
-  "debug_image_edit_mask"
+  "debug_image_edit_mask",
+  "debug_runtime_logging"
 ] as const;
 
 export type GlobalSwitchType = (typeof GLOBAL_SWITCH_TYPES)[number];
@@ -36,7 +37,8 @@ export const DEFAULT_GLOBAL_SWITCH_ENABLED: Record<GlobalSwitchType, boolean> = 
   cpa_sync: false,
   github_entry: true,
   ai_client_install_entry: true,
-  debug_image_edit_mask: false
+  debug_image_edit_mask: false,
+  debug_runtime_logging: false
 };
 
 function normalizeGlobalSwitchType(value: string): GlobalSwitchType | null {

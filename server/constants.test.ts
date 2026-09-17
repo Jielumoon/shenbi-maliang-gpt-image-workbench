@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_MULTI_IMAGE_CONCURRENCY, requestMultiImageConcurrency } from "./constants";
+import { DEFAULT_IMAGE_MODEL, DEFAULT_MULTI_IMAGE_CONCURRENCY, requestMultiImageConcurrency } from "./constants";
+
+describe("image model defaults", () => {
+  test("uses Sunburst as the quality-first server fallback", () => {
+    expect(DEFAULT_IMAGE_MODEL).toBe("gpt-image-2.5-sunburst");
+  });
+});
 
 describe("multi-image concurrency settings", () => {
   test("uses the default for empty or invalid values", () => {

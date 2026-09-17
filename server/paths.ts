@@ -21,6 +21,7 @@ export const DIST_LOGIN_DIR = path.join(ROOT, "dist", "login");
 export const CONFIG_FILE = path.join(DATA_DIR, "config.toml");
 export const DEBUG_DIR = path.join(DATA_DIR, "debug");
 export const IMAGE_EDIT_DEBUG_DIR = path.join(DEBUG_DIR, "image-edits");
+export const RUNTIME_LOG_DIR = path.join(DATA_DIR, "logs");
 export const APP_DB_PATH = Bun.env.GPT_IMAGE_APP_DB_PATH?.trim() || path.join(DATA_DIR, "app.db");
 export const CONFIG_DB_PATH = Bun.env.GPT_IMAGE_CONFIG_DB_PATH?.trim() || path.join(DATA_DIR, "config.db");
 

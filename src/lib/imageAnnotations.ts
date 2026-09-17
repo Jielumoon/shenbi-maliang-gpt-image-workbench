@@ -187,3 +187,40 @@ export function imageAnnotationEditorPosition(
     width: editorWidth
   };
 }
+
+export function imageAnnotationEditorPositionInViewport(
+  xPercent: number,
+  yPercent: number,
+  canvasWidth: number,
+  canvasHeight: number,
+  viewport: {
+    canvasLeft: number;
+    canvasTop: number;
+    width: number;
+    height: number;
+    margin?: number;
+  },
+  editorWidth = 292,
+  editorHeight = 48
+) {
+  const markerRadius = 14;
+  const gap = 10;
+  const margin = Math.max(0, viewport.margin ?? 12);
+  const anchorX = (clampPercent(xPercent) / 100) * canvasWidth;
+  const anchorY = (clampPercent(yPercent) / 100) * canvasHeight;
+  const minLeft = -viewport.canvasLeft + margin;
+  const maxLeft = viewport.width - viewport.canvasLeft - editorWidth - margin;
+  const right = anchorX + markerRadius + gap;
+  const left = anchorX - markerRadius - gap - editorWidth;
+  const preferredLeft = right <= maxLeft ? right : left;
+  const minTop = -viewport.canvasTop + margin;
+  const maxTop = viewport.height - viewport.canvasTop - editorHeight - margin;
+
+  return {
+    left: minLeft <= maxLeft ? Math.max(minLeft, Math.min(maxLeft, preferredLeft)) : preferredLeft,
+    top: minTop <= maxTop
+      ? Math.max(minTop, Math.min(maxTop, anchorY - editorHeight / 2))
+      : anchorY - editorHeight / 2,
+    width: editorWidth
+  };
+}

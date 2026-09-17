@@ -97,7 +97,7 @@
   justify-content: center;
   gap: 6px;
   border: 1px solid var(--button-default-border);
-  color: #111827;
+  color: var(--app-text, #111827);
   background: var(--button-default-bg);
   border-radius: 999px;
   padding: 0;
@@ -118,6 +118,80 @@
   font-size: 13px;
   font-weight: 600;
   text-align: center;
+}
+
+.image-editor-markup-zoom {
+  position: relative;
+  z-index: 32;
+}
+
+.image-editor-topbar .image-editor-markup-zoom-trigger {
+  min-width: 84px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid var(--button-default-border);
+  border-radius: 999px;
+  padding: 0 12px;
+  color: var(--app-text, #111827);
+  background: var(--button-default-bg);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.image-editor-topbar .image-editor-markup-zoom-trigger:hover,
+.image-editor-topbar .image-editor-markup-zoom-trigger[aria-expanded="true"] {
+  background: var(--button-default-hover-bg);
+}
+
+.image-editor-topbar .image-editor-markup-zoom-trigger svg {
+  transition: transform 150ms ease;
+}
+
+.image-editor-topbar .image-editor-markup-zoom-trigger svg.open {
+  transform: rotate(180deg);
+}
+
+.image-editor-markup-zoom-menu {
+  position: absolute;
+  top: calc(100% + 9px);
+  right: 0;
+  z-index: 130;
+  width: 142px;
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--app-border, #e5e7eb);
+  border-radius: 14px;
+  padding: 7px;
+  background: var(--app-menu-bg, rgba(255, 255, 255, 0.98));
+  box-shadow: 0 18px 54px rgba(15, 23, 42, 0.16);
+  backdrop-filter: blur(14px);
+}
+
+.image-editor-markup-zoom .image-editor-markup-zoom-menu button {
+  min-height: 36px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 9px;
+  padding: 6px 9px;
+  color: var(--app-text, #111827);
+  background: transparent;
+  font-size: 13px;
+  text-align: left;
+}
+
+.image-editor-markup-zoom .image-editor-markup-zoom-menu button:hover,
+.image-editor-markup-zoom .image-editor-markup-zoom-menu button.active {
+  background: var(--button-default-hover-bg);
+}
+
+.image-editor-markup-zoom .image-editor-markup-zoom-menu button svg {
+  justify-self: end;
 }
 
 .image-editor-actions::-webkit-scrollbar {
@@ -564,6 +638,11 @@
   touch-action: auto;
 }
 
+.image-editor-mode-surface {
+  position: absolute;
+  z-index: 7;
+}
+
 .image-editor-mask-canvas.enabled {
   pointer-events: auto;
   cursor: none;
@@ -832,15 +911,15 @@
   right: 0;
   bottom: 0;
   left: 0;
-  z-index: 6;
+  z-index: 12;
   display: grid;
   justify-items: center;
   gap: 0;
   padding: 0 18px 20px;
   background: transparent;
   opacity: 1;
-  filter: blur(0);
-  transform: translateY(0) scale(1);
+  filter: none;
+  transform: none;
   transition:
     opacity 180ms ease,
     transform 180ms ease,
@@ -862,7 +941,7 @@
 }
 
 .image-editor-composer {
-  width: min(770px, 100%);
+  width: min(1040px, 100%);
   min-height: 58px;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) 36px;
@@ -888,8 +967,76 @@
   padding: 0 9px 8px 12px;
 }
 
-.image-editor-annotation-summary {
+.image-editor-composer:has(.image-editor-input-expand-btn) {
+  border-radius: 26px;
+}
+
+.image-editor-composer.input-multiline:not(.input-expanded) {
+  grid-template-columns: minmax(0, 1fr) 36px;
+  grid-template-rows: minmax(0, 1fr) auto;
+  align-items: end;
+  row-gap: 8px;
+  border-radius: 26px;
+  padding: 10px 9px 8px 16px;
+}
+
+.image-editor-composer.is-annotation.has-annotations.input-multiline:not(.input-expanded) {
+  padding-top: 0;
+}
+
+.image-editor-composer.is-annotation.has-annotations.input-expanded {
+  padding: 0 9px 8px 16px;
+}
+
+.image-editor-composer.input-multiline:not(.input-expanded):has(.image-editor-composer-context) {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.image-editor-composer.input-multiline:not(.input-expanded) .image-editor-composer-context {
   grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+.image-editor-composer.input-multiline:not(.input-expanded):not(:has(.image-editor-composer-context)) .image-editor-textarea-shell {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+.image-editor-composer.input-multiline:not(.input-expanded):has(.image-editor-composer-context) .image-editor-textarea-shell {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+
+.image-editor-composer.input-multiline:not(.input-expanded):not(:has(.image-editor-composer-context)) .image-editor-composer-tools,
+.image-editor-composer.input-multiline:not(.input-expanded):not(:has(.image-editor-composer-context)) .editor-send-btn {
+  grid-row: 2;
+}
+
+.image-editor-composer.input-multiline:not(.input-expanded):has(.image-editor-composer-context) .image-editor-composer-tools,
+.image-editor-composer.input-multiline:not(.input-expanded):has(.image-editor-composer-context) .editor-send-btn {
+  grid-row: 3;
+}
+
+.image-editor-composer.input-multiline:not(.input-expanded) .image-editor-composer-tools {
+  grid-column: 1;
+}
+
+.image-editor-composer.input-multiline:not(.input-expanded) .editor-send-btn {
+  grid-column: 2;
+}
+
+.image-editor-composer.input-multiline:not(.input-expanded) .image-editor-input-expand-btn {
+  top: -1px;
+  right: 0;
+}
+
+.image-editor-composer-context {
+  min-width: 0;
+  max-width: 100%;
+  grid-column: 1 / -1;
+}
+
+.image-editor-annotation-summary {
   min-height: 46px;
   display: flex;
   align-items: center;
@@ -898,6 +1045,12 @@
   border-bottom: 1px solid #eef0f3;
   padding: 0 20px;
   color: #4b5563;
+}
+
+.image-editor-composer.is-annotation.has-annotations.input-multiline .image-editor-annotation-summary,
+.image-editor-composer.is-annotation.has-annotations.input-expanded .image-editor-annotation-summary {
+  margin-right: -9px;
+  margin-left: -16px;
 }
 
 .image-editor-annotation-toggle {
@@ -960,11 +1113,42 @@
 }
 
 .image-editor-composer-tools {
+  position: relative;
+  z-index: 3;
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
+.image-editor-composer .editor-composer-clear {
+  flex: 0 0 auto;
+  width: 0;
+  min-width: 0;
+  height: 34px;
+  margin-left: -6px;
+  overflow: visible;
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.82);
+  transition:
+    width 180ms ease,
+    min-width 180ms ease,
+    margin-left 180ms ease,
+    opacity 150ms ease,
+    transform 180ms ease;
+}
+
+.image-editor-composer .editor-composer-clear.is-visible {
+  width: 34px;
+  min-width: 34px;
+  margin-left: 0;
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1);
+}
+
+.image-editor-composer .model-picker-trigger,
+.image-editor-composer .quality-picker-trigger,
 .image-editor-composer .image-count-trigger {
   min-height: 34px;
   height: 34px;
@@ -972,6 +1156,12 @@
   background: transparent;
 }
 
+.image-editor-composer .model-picker-trigger:hover:not(:disabled),
+.image-editor-composer .model-picker-trigger:focus-visible,
+.image-editor-composer .model-picker-trigger[aria-expanded="true"],
+.image-editor-composer .quality-picker-trigger:hover:not(:disabled),
+.image-editor-composer .quality-picker-trigger:focus-visible,
+.image-editor-composer .quality-picker-trigger[aria-expanded="true"],
 .image-editor-composer .image-count-trigger:hover:not(:disabled),
 .image-editor-composer .image-count-trigger:focus-visible,
 .image-editor-composer .image-count-trigger[aria-expanded="true"] {
@@ -979,7 +1169,7 @@
 }
 
 .image-editor-count-notice {
-  max-width: min(770px, 100%);
+  max-width: min(1040px, 100%);
   margin-bottom: 6px;
   border: 1px solid #dbeafe;
   border-radius: 999px;
@@ -999,7 +1189,6 @@
 }
 
 .image-editor-composer-preview-row {
-  grid-column: 1 / -1;
   max-height: 86px;
   overflow-y: auto;
   scrollbar-width: none;
@@ -1062,7 +1251,8 @@
   content: "";
   bottom: calc(100% + 3px);
   border: 5px solid transparent;
-  border-top-color: rgba(17, 24, 39, 0.92);
+  z-index: 7;
+  border-top-color: #111827;
   transform: translate(-50%, 2px);
 }
 
@@ -1073,7 +1263,7 @@
   padding: 6px 8px;
   border-radius: 6px;
   color: #fff;
-  background: rgba(17, 24, 39, 0.92);
+  background: #111827;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
   font-size: 12px;
   line-height: 1;
@@ -1095,22 +1285,133 @@
   transform: translate(-50%, 4px);
 }
 
-.image-editor-composer input {
+.image-editor-textarea-shell {
+  position: relative;
+  min-width: 0;
+  min-height: 38px;
+}
+
+.image-editor-composer textarea {
+  box-sizing: border-box;
+  display: block;
   min-width: 0;
   height: 38px;
+  min-height: 38px;
+  max-height: 220px;
+  width: 100%;
+  resize: none;
+  overflow-y: auto;
   border: 0;
   background: transparent;
   box-shadow: none;
-  padding: 0;
+  padding: 6px 0;
+  line-height: 1.55;
 }
 
-.image-editor-composer input:focus {
+.image-editor-textarea-shell:has(.image-editor-input-expand-btn) textarea {
+  padding-right: 24px;
+}
+
+.image-editor-composer textarea:focus {
   box-shadow: none;
+}
+
+.image-editor-input-expand-btn {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  z-index: 2;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  padding: 0;
+  color: #6b7280;
+  background: rgba(243, 244, 246, 0.94);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.10);
+}
+
+.image-editor-input-expand-btn:hover,
+.image-editor-input-expand-btn:focus-visible {
+  color: #111827;
+  background: #e5e7eb;
+}
+
+.image-editor-composer.input-expanded {
+  position: fixed;
+  z-index: 180;
+  max-width: none;
+  min-height: 0;
+  margin: 0;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  align-items: end;
+  row-gap: 8px;
+  border-radius: 26px;
+  padding: 10px 9px 8px 16px;
+  box-shadow: 0 14px 44px rgba(15, 23, 42, 0.12);
+}
+
+.image-editor-composer.input-expanded .image-editor-composer-context {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  max-height: 96px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.image-editor-composer.input-expanded .image-editor-textarea-shell {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  align-self: stretch;
+  height: auto;
+  min-height: 0;
+}
+
+.image-editor-composer.input-expanded .image-editor-input-expand-btn {
+  top: -1px;
+  right: 0;
+}
+
+.image-editor-composer.input-expanded textarea {
+  height: 100%;
+  max-height: none;
+  padding: 10px 36px 10px 8px;
+}
+
+.image-editor-composer.input-expanded .image-editor-composer-tools {
+  grid-column: 1;
+  grid-row: 3;
+}
+
+.image-editor-composer.input-expanded .editor-send-btn {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+.image-editor-composer.input-expanded:not(:has(.image-editor-composer-context)) {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.image-editor-composer.input-expanded:not(:has(.image-editor-composer-context)) .image-editor-textarea-shell {
+  grid-row: 1;
+}
+
+.image-editor-composer.input-expanded:not(:has(.image-editor-composer-context)) .image-editor-composer-tools,
+.image-editor-composer.input-expanded:not(:has(.image-editor-composer-context)) .editor-send-btn {
+  grid-row: 2;
+}
+
+.image-editor-composer-placeholder {
+  width: min(1040px, 100%);
+  pointer-events: none;
 }
 
 .image-editor-composer-wrap .composer-material-drawer,
 .image-editor-composer-wrap .material-picker {
-  width: min(770px, 100%);
+  width: min(1040px, 100%);
   pointer-events: auto;
 }
 

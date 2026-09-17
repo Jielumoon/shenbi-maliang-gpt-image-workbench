@@ -15,6 +15,7 @@ import { type MessageRevision } from "../../lib/chatRender";
 import { cx } from "../../lib/cx";
 import { formatImageAnnotationMessageDisplayText } from "../../lib/imageAnnotations";
 import { imageResultPlaceholderState } from "../../lib/imageResultPlaceholder";
+import { imageModelDisplayName, isImageModelId } from "../../lib/imageModels";
 import { workImageFromMessage } from "../../lib/workImages";
 import type { ImageJob, Message, MessageSourceReferenceImage, WorkImage } from "../../types";
 import { useToast } from "../../ui";
@@ -22,6 +23,7 @@ import { useToast } from "../../ui";
 const USER_MESSAGE_COLLAPSED_LINES = 10;
 const ASSISTANT_LONG_IMAGE_RATIO = 1.8;
 const MESSAGE_MORE_CARD_WIDTH = 172;
+const IMAGE_MESSAGE_MORE_CARD_WIDTH = 268;
 const MESSAGE_MORE_CARD_GAP = 8;
 const MESSAGE_MORE_CARD_VIEWPORT_PADDING = 12;
 
@@ -103,6 +105,42 @@ function requestedMessageImageCount(userMessage: Message, assistantMessages: Mes
 
 function messageImageIndex(message: Message) {
   return positiveMessageMetadataInteger(message, "imageIndex");
+}
+
+type ImageExecutionDetails = {
+  modelLabel: string;
+  languageModelLabel: string;
+  qualityLabel: string;
+  fallbackReason: string;
+};
+
+function imageExecutionDetails(message: Message): ImageExecutionDetails | null {
+  const model = String(
+    message.metadata?.actualModel
+      ?? message.metadata?.requestedModel
+      ?? message.metadata?.model
+      ?? ""
+  ).trim();
+  const languageModel = String(message.metadata?.actualLanguageModel ?? "").trim();
+  const quality = String(
+    message.metadata?.actualQuality
+      ?? message.metadata?.requestedQuality
+      ?? message.imageQuality
+      ?? ""
+  ).trim();
+  if (!model && !languageModel && !quality) return null;
+  const modelLabel = isImageModelId(model)
+    ? imageModelDisplayName(model)
+    : model === "chatgpt-web-auto"
+      ? "ChatGPT Auto"
+      : model || "-";
+  const fallbackReason = String(message.metadata?.modelFallbackReason ?? "").trim();
+  return {
+    modelLabel,
+    languageModelLabel: languageModel || "-",
+    qualityLabel: quality || "auto",
+    fallbackReason
+  };
 }
 
 function requestedImageAspectRatio(size: unknown) {
@@ -220,7 +258,13 @@ function messageTimeLabel(value: string, locale: string, t: (key: string, params
   return t("chatMessages.dateTime", { date: dateText, time });
 }
 
-function MessageMoreButton({ createdAt }: { createdAt: string }) {
+function MessageMoreButton({
+  createdAt,
+  imageExecution
+}: {
+  createdAt: string;
+  imageExecution?: ImageExecutionDetails | null;
+}) {
   const { resolvedLanguage, t } = useI18n();
   const [open, setOpen] = useState(false);
   const [cardStyle, setCardStyle] = useState<CSSProperties>({});
@@ -228,6 +272,7 @@ function MessageMoreButton({ createdAt }: { createdAt: string }) {
   const rootRef = useRef<HTMLSpanElement | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const visible = open && typeof document !== "undefined";
+  const hasImageExecution = Boolean(imageExecution);
 
   const updatePosition = useCallback(() => {
     const root = rootRef.current;
@@ -235,7 +280,8 @@ function MessageMoreButton({ createdAt }: { createdAt: string }) {
     const rect = root.getBoundingClientRect();
     const viewportWidth = document.documentElement.clientWidth;
     const viewportHeight = document.documentElement.clientHeight;
-    const width = Math.min(MESSAGE_MORE_CARD_WIDTH, Math.max(1, viewportWidth - MESSAGE_MORE_CARD_VIEWPORT_PADDING * 2));
+    const preferredWidth = hasImageExecution ? IMAGE_MESSAGE_MORE_CARD_WIDTH : MESSAGE_MORE_CARD_WIDTH;
+    const width = Math.min(preferredWidth, Math.max(1, viewportWidth - MESSAGE_MORE_CARD_VIEWPORT_PADDING * 2));
     const height = cardRef.current?.offsetHeight ?? 45;
     const spaceBelow = viewportHeight - rect.bottom - MESSAGE_MORE_CARD_VIEWPORT_PADDING;
     const spaceAbove = rect.top - MESSAGE_MORE_CARD_VIEWPORT_PADDING;
@@ -252,7 +298,7 @@ function MessageMoreButton({ createdAt }: { createdAt: string }) {
     const top = Math.min(Math.max(rawTop, MESSAGE_MORE_CARD_VIEWPORT_PADDING), maxTop);
     setPlacement(nextPlacement);
     setCardStyle({ left, top, width });
-  }, []);
+  }, [hasImageExecution]);
 
   useLayoutEffect(() => {
     if (!visible) return;
@@ -289,10 +335,10 @@ function MessageMoreButton({ createdAt }: { createdAt: string }) {
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        aria-label={t("common.more")}
+        aria-label={t("chatMessages.moreActions")}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title={t("common.more")}
+        data-tooltip={t("chatMessages.moreActions")}
       >
         <MoreHorizontal size={17} />
       </button>
@@ -300,7 +346,7 @@ function MessageMoreButton({ createdAt }: { createdAt: string }) {
         ? createPortal(
             <div
               ref={cardRef}
-              className="message-more-card ui-pop-motion"
+              className={cx("message-more-card ui-pop-motion", hasImageExecution && "has-image-details")}
               style={cardStyle}
               role="dialog"
               aria-label={t("chatMessages.messageTime")}
@@ -309,7 +355,33 @@ function MessageMoreButton({ createdAt }: { createdAt: string }) {
               onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => event.stopPropagation()}
             >
-              <time dateTime={createdAt || undefined}>{messageTimeLabel(createdAt, resolvedLanguage, t)}</time>
+              {imageExecution ? (
+                <>
+                  <dl className="message-more-image-details">
+                    <div>
+                      <dt>{t("chatMessages.imageModel")}</dt>
+                      <dd>{imageExecution.modelLabel}</dd>
+                    </div>
+                    <div>
+                      <dt>{t("chatMessages.languageModel")}</dt>
+                      <dd>{imageExecution.languageModelLabel}</dd>
+                    </div>
+                    <div>
+                      <dt>{t("picker.quality")}</dt>
+                      <dd>{imageExecution.qualityLabel}</dd>
+                    </div>
+                    <div>
+                      <dt>{t("chatMessages.messageTime")}</dt>
+                      <dd><time dateTime={createdAt || undefined}>{messageTimeLabel(createdAt, resolvedLanguage, t)}</time></dd>
+                    </div>
+                  </dl>
+                  {imageExecution.fallbackReason ? (
+                    <p className="message-more-image-note">{imageExecution.fallbackReason}</p>
+                  ) : null}
+                </>
+              ) : (
+                <time dateTime={createdAt || undefined}>{messageTimeLabel(createdAt, resolvedLanguage, t)}</time>
+              )}
             </div>,
             document.body
           )
@@ -517,12 +589,12 @@ export function ChatMessageThread({
         {!editingActive ? (
           <div className="message-version-actions">
             {capabilities.copyText ? (
-              <button type="button" onClick={() => void copyMessage()} aria-label={t("chatMessages.copy")}>
+              <button type="button" onClick={() => void copyMessage()} aria-label={t("chatMessages.copy")} data-tooltip={t("chatMessages.copy")}>
                 <Copy size={17} />
               </button>
             ) : null}
             {capabilities.editMessage && onSubmitEdit ? (
-              <button type="button" onClick={startEditing} disabled={isSubmitting} aria-label={t("chatMessages.editMessage")} title={t("chatMessages.editMessage")}>
+              <button type="button" onClick={startEditing} disabled={isSubmitting} aria-label={t("chatMessages.editMessage")} data-tooltip={t("chatMessages.editMessage")}>
                 <MessageEditIcon size={16} />
               </button>
             ) : null}
@@ -533,20 +605,20 @@ export function ChatMessageThread({
                 onClick={() => onRetryJob?.(revisionJobId)}
                 disabled={isSubmitting || retrying}
                 aria-label={t("chatMessages.retryMessage")}
-                title={t("chatMessages.retry")}
+                data-tooltip={t("chatMessages.retry")}
               >
                 <RefreshCw size={16} />
               </button>
             ) : null}
             {hasVersions ? (
               <>
-                <button type="button" onClick={() => moveVersion(-1)} disabled={currentIndex === 0} aria-label={t("chatMessages.previousVersion")}>
+                <button type="button" onClick={() => moveVersion(-1)} disabled={currentIndex === 0} aria-label={t("chatMessages.previousVersion")} data-tooltip={t("chatMessages.previousVersion")}>
                   <ChevronLeft size={17} />
                 </button>
                 <span>
                   {currentIndex + 1}/{versions.length}
                 </span>
-                <button type="button" onClick={() => moveVersion(1)} disabled={currentIndex === maxIndex} aria-label={t("chatMessages.nextVersion")}>
+                <button type="button" onClick={() => moveVersion(1)} disabled={currentIndex === maxIndex} aria-label={t("chatMessages.nextVersion")} data-tooltip={t("chatMessages.nextVersion")}>
                   <ChevronRight size={17} />
                 </button>
               </>
@@ -663,6 +735,7 @@ function AssistantImageGroup({
   const { t } = useI18n();
   const currentIndex = Math.max(0, Math.min(activeIndex, slots.length - 1));
   const activeMessage = slots[currentIndex] ?? null;
+  const activeExecution = activeMessage ? imageExecutionDetails(activeMessage) : null;
   const image = activeMessage ? workImageFromMessage(activeMessage) : null;
   const capabilities = resolveChatMessageCapabilities(mode, capabilityOverrides);
   const canOpenEditor = capabilities.editImage && Boolean(image && onOpenEditor);
@@ -853,11 +926,11 @@ function AssistantImageGroup({
         {activeMessage ? (
           <div className="assistant-image-toolbar assistant-image-group-toolbar">
             {capabilities.copyImage ? (
-              <button type="button" onClick={() => void copyImage()} disabled={copyingImage} aria-label={t("chatMessages.copyImage")} title={t("chatMessages.copyImage")}>
+              <button type="button" onClick={() => void copyImage()} disabled={copyingImage} aria-label={t("chatMessages.copyImage")} data-tooltip={t("chatMessages.copyImage")}>
                 <Copy size={17} />
               </button>
             ) : null}
-            <MessageMoreButton createdAt={activeMessage.createdAt} />
+            <MessageMoreButton createdAt={activeMessage.createdAt} imageExecution={activeExecution} />
           </div>
         ) : null}
       </div>
@@ -1013,6 +1086,7 @@ export function ChatMessage({
   const userTextRef = useRef<HTMLParagraphElement | null>(null);
   const { showToast } = useToast();
   const { t } = useI18n();
+  const imageExecution = message.role === "assistant" ? imageExecutionDetails(message) : null;
   const image = workImageFromMessage(message);
   const capabilities = resolveChatMessageCapabilities(mode, capabilityOverrides);
   const displayContent = message.role === "user"
@@ -1299,11 +1373,11 @@ export function ChatMessage({
           </div>
           <div className="assistant-image-toolbar">
             {capabilities.copyImage ? (
-              <button type="button" onClick={() => void copyImage()} disabled={copyingImage} aria-label={t("chatMessages.copyImage")} title={t("chatMessages.copyImage")}>
+              <button type="button" onClick={() => void copyImage()} disabled={copyingImage} aria-label={t("chatMessages.copyImage")} data-tooltip={t("chatMessages.copyImage")}>
                 <Copy size={17} />
               </button>
             ) : null}
-            <MessageMoreButton createdAt={message.createdAt} />
+            <MessageMoreButton createdAt={message.createdAt} imageExecution={imageExecution} />
           </div>
         </>
       ) : null}

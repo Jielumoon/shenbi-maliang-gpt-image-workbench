@@ -2,6 +2,30 @@
 
 记录系统近期面向用户的功能更新、体验优化和问题修复。
 
+## v0.1.74 - 2026-09-17
+
+### 中文
+
+- 创建和编辑图片现在正式支持 `GPT‑Image‑2.5 Flare`、`GPT‑Image‑2.5 Sunburst` 与 `GPT Image 2`：可在快速、精细和兼容模式间切换，并使用自动、低、中、高、超高或最高质量；选择会随当前对话延续，结果详情会展示实际使用的图片模型、语言模型和质量。
+- 后台图片渠道支持刷新可用模型目录并分别选择图片模型与语言模型；新建渠道默认使用 `GPT‑Image‑2.5 Sunburst` 与 `GPT‑6 Astra`，同时保留手动填写和旧配置兼容。
+- 输入框新增绘图素材，可使用画笔、文字、橡皮擦和多种几何图形制作或继续编辑构图草图，并作为结构参考发送给图片渠道。
+- 图片编辑新增“标注”模式，可直接在原图上绘制画笔、文字和形状后提交修改；同时新增一键移除背景，并优化评论浮层位置、擦除画笔指针和标注缩放操作。
+- 聊天与图片编辑输入框支持更宽的布局、多行自适应和全屏展开；粘贴或拖入图片时会更稳定地生成临时素材，并改进素材预览、清空和键盘提交体验。
+- 侧栏新增“更多”入口，集中提供提示词创作与 OpenAI 图片来源验证；验证工具可检查 C2PA 与 SynthID 信号，并在站内能力不可用时引导使用官方验证页面。
+- 图片生成等待界面新增更细致的生成与编辑阶段提示，并可在等待时启动贪吃蛇小游戏，支持键盘、鼠标拖动和触屏操作。
+- 后台新增可选的运行故障日志，可查看、筛选、下载或打开日志目录，帮助排查服务端、接口和浏览器异常；日志按容量和时间自动清理，不记录提示词、请求正文或密钥。
+
+### English
+
+- Image creation and editing now officially support `GPT‑Image‑2.5 Flare`, `GPT‑Image‑2.5 Sunburst`, and `GPT Image 2`: users can switch among fast, precise, and compatibility modes and choose automatic, low, medium, high, extra-high, or maximum quality; selections carry forward within the conversation, and result details show the image model, language model, and quality actually used.
+- Image channels in the admin console can now refresh their available model catalog and select image and language models separately; new channels default to `GPT‑Image‑2.5 Sunburst` and `GPT‑6 Astra` while retaining manual entry and compatibility with existing configurations.
+- The composer now includes drawing materials: use brushes, text, an eraser, and multiple geometric shapes to create or continue editing a composition sketch, then send it to the image provider as a structural reference.
+- Image editing now includes a Markup mode for drawing brushes, text, and shapes directly over the source image before submitting changes; it also adds one-click background removal and improves comment placement, erase-brush cursor alignment, and markup zoom controls.
+- Chat and image-edit inputs now use a wider layout with adaptive multiline sizing and full-screen expansion; pasted or dropped images become temporary materials more reliably, with improved material previews, clearing, and keyboard submission.
+- A new More entry in the sidebar groups prompt creation and OpenAI image provenance verification; the verifier checks C2PA and SynthID signals and directs users to the official verifier when in-app verification is unavailable.
+- The image-generation waiting experience now shows more detailed generation and editing stages and offers an optional Snake game with keyboard, pointer-drag, and touch controls.
+- Administrators can optionally enable runtime diagnostics to view, filter, download, or open logs for server, API, and browser failures; logs rotate automatically by age and size and never record prompts, request bodies, or secrets.
+
 ## v0.1.73 - 2026-09-04
 
 ### 中文

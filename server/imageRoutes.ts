@@ -4,6 +4,7 @@ import { caseMaterialReferenceFromSource, caseMaterialSourcesByIds } from "./cas
 import { applyCaseFieldSuggestionsToImages, ensureCaseFieldSuggestionsForImage } from "./caseSuggestions";
 import {
   AUTO_PROVIDER_ID,
+  DEFAULT_IMAGE_MODEL,
   IMAGE_JOB_RUNNING_TIMEOUT_MS,
   IMAGE_JOB_TIMEOUT_ERROR,
   requestImageQuality,
@@ -93,7 +94,17 @@ import {
 } from "./chatStore";
 import { imageBatchResult, parseImageBatchIds } from "./imageBatch";
 import { finalizeProviderEditPrompt, normalizeImageEditRequest } from "./imageEditRequest";
+import {
+  DRAWING_REFERENCE_REQUEST_KEY,
+  isDrawingReferenceName
+} from "../src/lib/drawingReference";
+import { isImageMarkupReferenceName } from "../src/lib/imageMarkup";
 import { resolveImageEditCount, resolvePromptImageCount } from "../src/lib/imagePromptCount";
+import {
+  isImageModelId,
+  isImageQualitySupported,
+  type ImageModelId
+} from "../src/lib/imageModels";
 import type { ImageEditIntent } from "../src/lib/imageAnnotations";
 import {
   INHERITED_SOURCE_BACKGROUND_REQUEST_KEY,
@@ -173,6 +184,25 @@ function requestOptionText(body: Record<string, unknown>, ...fields: string[]) {
     if (value !== undefined && value !== null) return String(value).trim();
   }
   return "";
+}
+
+function requestedImageModel(body: Record<string, unknown>, provider: RuntimeProviderRow) {
+  const rawModel = requestOptionText(body, "model");
+  if (!rawModel) {
+    return {
+      error: "",
+      model: String(provider.model || "").trim() || DEFAULT_IMAGE_MODEL,
+      explicit: false
+    };
+  }
+  if (!isImageModelId(rawModel)) {
+    return {
+      error: "model 仅支持 gpt-image-2.5-flare、gpt-image-2.5-sunburst 或 gpt-image-2",
+      model: DEFAULT_IMAGE_MODEL,
+      explicit: true
+    };
+  }
+  return { error: "", model: rawModel as ImageModelId, explicit: true };
 }
 
 function normalizedImageRequestOptions(body: Record<string, unknown>, includeInputFidelity = false) {
@@ -511,12 +541,16 @@ function providerEditPrompt(
   prompt: string,
   imageCount: number,
   hasMask: boolean,
-  editIntent: ImageEditIntent = "standard"
+  editIntent: ImageEditIntent = "standard",
+  drawingReference = false,
+  imageMarkupReference = false
 ) {
   return finalizeProviderEditPrompt({
     basePrompt: providerPrompt(prompt, imageCount),
     editIntent,
-    hasMask
+    hasMask,
+    drawingReference,
+    imageMarkupReference
   });
 }
 
@@ -601,7 +635,7 @@ async function saveProviderImagesWithRetry({
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     if (signal?.aborted) throw new Error("图片任务已取消");
     try {
-      const { provider, responseJson, result: savedImages } = await callProviderChain<Awaited<ReturnType<typeof saveProviderImageResults>>>(
+      const { provider, responseJson, result: savedImages, execution } = await callProviderChain<Awaited<ReturnType<typeof saveProviderImageResults>>>(
         providers,
         mode,
         requestPayload,
@@ -637,7 +671,7 @@ async function saveProviderImagesWithRetry({
         await deleteStoredFilesIfUnreferenced(savedImages.map((image) => image.file.path));
         throw new Error("图片任务已取消");
       }
-      return { provider, responseJson, savedImages, attemptNo: attempt, retryCount, maxAttempts };
+      return { provider, responseJson, savedImages, execution, attemptNo: attempt, retryCount, maxAttempts };
     } catch (error) {
       if (providerRequestWasCancelled(error, signal)) throw error;
       if (attempt < maxAttempts) {
@@ -666,7 +700,26 @@ type ProviderImageCompletionBatch = {
   attemptNo: number;
   retryCount: number;
   maxAttempts: number;
+  requestedModel: string;
+  actualModel: string;
+  actualLanguageModel: string;
+  actualRouteMode: string;
+  requestedQuality: string;
+  actualQuality: string;
+  modelFallbackReason: string;
 };
+
+function imageExecutionMessageMetadata(result: ProviderImageCompletionBatch) {
+  return {
+    requestedModel: result.requestedModel,
+    actualModel: result.actualModel,
+    actualLanguageModel: result.actualLanguageModel,
+    actualRouteMode: result.actualRouteMode,
+    requestedQuality: result.requestedQuality,
+    actualQuality: result.actualQuality,
+    ...(result.modelFallbackReason ? { modelFallbackReason: result.modelFallbackReason } : {})
+  };
+}
 
 async function runProviderImageCompletion({
   providers,
@@ -753,7 +806,8 @@ async function runProviderImageCompletion({
               responseJson: result.responseJson,
               attemptNo: result.attemptNo,
               retryCount: result.retryCount,
-              maxAttempts: result.maxAttempts
+              maxAttempts: result.maxAttempts,
+              ...result.execution
             }
           };
         } catch (error) {
@@ -1515,7 +1569,7 @@ async function runStoredImageJob({
               imagePrompt,
               "generation",
               size,
-              quality,
+              result.actualQuality || quality,
               result.provider.id,
               saved.file.mimeType,
               null,
@@ -1531,6 +1585,7 @@ async function runStoredImageJob({
             insertMessage(job.user_id, retrySessionId, "assistant", "已生成图片", saved.id, {
               mode: "generation",
               jobId: job.id,
+              ...imageExecutionMessageMetadata(result),
               n: requestedImageCount,
               imageIndex,
               imageTotal: requestedImageCount,
@@ -1604,6 +1659,13 @@ async function runStoredImageJob({
     const validSourceAssets = sourceAssets.filter(Boolean) as ImageReferenceSourceAsset[];
     const validSourceCases = sourceCases.filter(Boolean) as NonNullable<(typeof sourceCases)[number]>[];
     const validSourceReferences = sourceReferences.filter(Boolean) as NonNullable<(typeof sourceReferences)[number]>[];
+    const messageMetadata = jobUserMessageMetadata(job.user_id, retrySessionId, job.id);
+    const retryDrawingReference = requestPayload[DRAWING_REFERENCE_REQUEST_KEY] === true
+      || validSourceAssets.some((item) => isDrawingReferenceName(item.name))
+      || validSourceReferences.some((item) => isDrawingReferenceName(item.source_name));
+    const retryImageMarkupReference = messageMetadata.imageMarkupReference === true
+      || validSourceAssets.some((item) => isImageMarkupReferenceName(item.name))
+      || validSourceReferences.some((item) => isImageMarkupReferenceName(item.source_name));
     const imageReferenceSources = [
       ...imageReferenceInputsFromImages(validSourceImages),
       ...imageReferenceInputsFromAssets(validSourceAssets),
@@ -1641,7 +1703,6 @@ async function runStoredImageJob({
       ...(retryOutputFormat ? { output_format: retryOutputFormat } : {})
     }, retryShouldInheritSourceBackground);
 
-    const messageMetadata = jobUserMessageMetadata(job.user_id, retrySessionId, job.id);
     const maskWasRequested = Boolean(requestPayload.mask);
     const maskPath = String(requestPayload.maskPath ?? messageMetadata.maskPath ?? "").trim();
     const storedMaskDataUrl = maskWasRequested && maskPath
@@ -1656,7 +1717,8 @@ async function runStoredImageJob({
       ...requestPayload,
       images: imageUrls.map((image_url) => ({ image_url })),
       ...retryBackgroundOptions,
-      ...(retryShouldInheritSourceBackground ? { [INHERITED_SOURCE_BACKGROUND_REQUEST_KEY]: true } : {})
+      ...(retryShouldInheritSourceBackground ? { [INHERITED_SOURCE_BACKGROUND_REQUEST_KEY]: true } : {}),
+      ...(retryDrawingReference ? { [DRAWING_REFERENCE_REQUEST_KEY]: true } : {})
     };
     if (storedInheritedSourceBackground && promptRequestsNonTransparentBackground) {
       delete retryPayload.background;
@@ -1703,7 +1765,14 @@ async function runStoredImageJob({
       sessionId: retrySessionId,
       jobId: job.id,
       retryCount: maxAutoRetries,
-      buildPrompt: (batchPrompt, count) => providerEditPrompt(batchPrompt, count, Boolean(maskDataUrl), retryEditIntent),
+      buildPrompt: (batchPrompt, count) => providerEditPrompt(
+        batchPrompt,
+        count,
+          Boolean(maskDataUrl),
+          retryEditIntent,
+          retryDrawingReference,
+          retryImageMarkupReference
+        ),
       onBatch: async ({ prompt: imagePrompt, imageIndexStart, imageIndexes, items, result }) => {
         await assertImageJobExecutionIsActiveAfterSave(
           job.id,
@@ -1732,7 +1801,7 @@ async function runStoredImageJob({
             imagePrompt,
             "edit",
             size,
-            quality,
+            result.actualQuality || quality,
             result.provider.id,
             saved.file.mimeType,
             primarySourceImage?.id ?? null,
@@ -1754,6 +1823,7 @@ async function runStoredImageJob({
           insertMessage(job.user_id, retrySessionId, "assistant", "已完成图片编辑", saved.id, {
             mode: "edit",
             jobId: job.id,
+            ...imageExecutionMessageMetadata(result),
             parentImageId: primarySourceImage?.id ?? null,
             sourceAssetIds: sourceIds.assetIds,
             sourceReferenceIds: sourceIds.referenceIds,
@@ -2314,8 +2384,14 @@ api.post("/images/generate", async (c) => {
     return c.json({ error: errorMessage(error, "渠道配置不可用") }, 400);
   }
   const provider = providers[0];
+  const modelSelection = requestedImageModel(body, provider);
+  if (modelSelection.error) return c.json({ error: modelSelection.error }, 400);
+  const model = modelSelection.model;
   const size = requestImageSize(body.size);
   const quality = requestImageQuality(body.quality, provider.default_quality);
+  if (modelSelection.explicit && isImageModelId(model) && !isImageQualitySupported(model, quality)) {
+    return c.json({ error: `${model} 不支持质量 ${quality}` }, 400);
+  }
   const imageCount = resolvePromptImageCount(prompt, body.n ?? body.imageCount);
   const imageOptions = normalizedImageRequestOptions(body);
   if (imageOptions.error) return c.json({ error: imageOptions.error }, 400);
@@ -2332,6 +2408,7 @@ api.post("/images/generate", async (c) => {
   const generationSettings = imageGenerationSettings();
   const requestPayload = {
     prompt: providerPrompt(prompt, imageCount),
+    model,
     size,
     quality,
     n: imageCount,
@@ -2345,6 +2422,7 @@ api.post("/images/generate", async (c) => {
     mode: "generation",
     jobId,
     clientRequestId,
+    model,
     size,
     quality,
     ...imageRequestMessageMetadata(imageOptions.payload),
@@ -2445,7 +2523,7 @@ api.post("/images/generate", async (c) => {
               imagePrompt,
               "generation",
               size,
-              quality,
+              result.actualQuality || quality,
               result.provider.id,
               saved.file.mimeType,
               null,
@@ -2461,6 +2539,7 @@ api.post("/images/generate", async (c) => {
             insertMessage(user.id, sessionId, "assistant", "已生成图片", saved.id, {
               mode: "generation",
               jobId,
+              ...imageExecutionMessageMetadata(result),
               ...imageRequestMessageMetadata(imageOptions.payload),
               n: imageCount,
               imageIndex,
@@ -2613,8 +2692,14 @@ api.post("/images/edit", async (c) => {
     return c.json({ error: errorMessage(error, "渠道配置不可用") }, 400);
   }
   const provider = providers[0];
+  const modelSelection = requestedImageModel(body, provider);
+  if (modelSelection.error) return c.json({ error: modelSelection.error }, 400);
+  const model = modelSelection.model;
   const size = requestImageSize(body.size);
   const quality = requestImageQuality(body.quality, provider.default_quality);
+  if (modelSelection.explicit && isImageModelId(model) && !isImageQualitySupported(model, quality)) {
+    return c.json({ error: `${model} 不支持质量 ${quality}` }, 400);
+  }
   const sourceInputCount = sourceImageIds.length
     + sourceAssetIds.length
     + sourceCaseItemIds.length
@@ -2649,6 +2734,14 @@ api.post("/images/edit", async (c) => {
   const validSourceAssets = sourceAssets.filter(Boolean) as ImageReferenceSourceAsset[];
   const validSourceCases = sourceCases.filter(Boolean) as NonNullable<(typeof sourceCases)[number]>[];
   const validSourceReferences = sourceReferences.filter(Boolean) as NonNullable<(typeof sourceReferences)[number]>[];
+  const drawingReference = body.drawingReference === true
+    || validSourceAssets.some((item) => isDrawingReferenceName(item.name))
+    || validSourceReferences.some((item) => isDrawingReferenceName(item.source_name))
+    || sourceInlineImages.some((item) => isDrawingReferenceName(item.name));
+  const imageMarkupReference = body.imageMarkupReference === true
+    || validSourceAssets.some((item) => isImageMarkupReferenceName(item.name))
+    || validSourceReferences.some((item) => isImageMarkupReferenceName(item.source_name))
+    || sourceInlineImages.some((item) => isImageMarkupReferenceName(item.name));
   const primarySourceImage = validSourceImages[0] ?? null;
   const sourceCaseReferences = validSourceCases.map(caseMaterialReferenceFromSource);
   const existingSourceReferences = validSourceReferences.map(publicMessageSourceReference);
@@ -2736,16 +2829,25 @@ api.post("/images/edit", async (c) => {
     }
   }
   const timestamp = now();
-  const requestPrompt = providerEditPrompt(prompt, imageCount, Boolean(maskDataUrl), editIntent);
+  const requestPrompt = providerEditPrompt(
+    prompt,
+    imageCount,
+    Boolean(maskDataUrl),
+    editIntent,
+    drawingReference,
+    imageMarkupReference
+  );
   const generationSettings = imageGenerationSettings();
   const requestPayload = {
     prompt: requestPrompt,
+    model,
     size,
     quality,
     n: imageCount,
     editIntent,
     [IMAGE_COMPLETION_CONCURRENCY_REQUEST_KEY]: generationSettings.multiImageConcurrency,
     images: imageUrls.map((image_url) => ({ image_url })),
+    ...(drawingReference ? { [DRAWING_REFERENCE_REQUEST_KEY]: true } : {}),
     ...resolvedImageOptions,
     ...(shouldInheritSourceBackground ? { [INHERITED_SOURCE_BACKGROUND_REQUEST_KEY]: true } : {}),
     ...(maskDataUrl ? { mask: maskDataUrl } : {}),
@@ -2795,6 +2897,8 @@ api.post("/images/edit", async (c) => {
       sourceAssetIds,
       sourceCaseItemIds,
       sourceReferenceIds,
+      ...(drawingReference ? { drawingReference: true } : {}),
+      ...(imageMarkupReference ? { imageMarkupReference: true } : {}),
       ...(sourceCaseReferences.length > 0 ? { sourceCaseReferences } : {}),
       ...(existingSourceReferences.length > 0 ? { sourceReferenceImages: existingSourceReferences } : {}),
       ...(referenceAssetId ? { referenceAssetId } : {}),
@@ -2803,6 +2907,7 @@ api.post("/images/edit", async (c) => {
       ...(imageAnnotations.length > 0 ? { imageAnnotations } : {}),
       ...(maskSnapshot ? { maskPath: maskSnapshot.path, maskMimeType: maskSnapshot.mimeType } : {}),
       hideReference,
+      model,
       size,
       quality,
       ...imageRequestMessageMetadata(imageOptions.payload),
@@ -2840,6 +2945,8 @@ api.post("/images/edit", async (c) => {
       sourceCaseItemIds,
       sourceReferenceIds: messageSourceReferences.map((item) => item.sourceReferenceId).filter(Boolean),
       sourceReferenceImages: messageSourceReferences,
+      ...(drawingReference ? { drawingReference: true } : {}),
+      ...(imageMarkupReference ? { imageMarkupReference: true } : {}),
       ...(sourceCaseReferences.length > 0 ? { sourceCaseReferences } : {}),
       ...(referenceAssetId ? { referenceAssetId } : {}),
       hasMask: Boolean(maskDataUrl),
@@ -2847,6 +2954,7 @@ api.post("/images/edit", async (c) => {
       ...(imageAnnotations.length > 0 ? { imageAnnotations } : {}),
       ...(maskSnapshot ? { maskPath: maskSnapshot.path, maskMimeType: maskSnapshot.mimeType } : {}),
       hideReference,
+      model,
       size,
       quality,
       n: imageCount,
@@ -2947,7 +3055,14 @@ api.post("/images/edit", async (c) => {
         sessionId,
         jobId,
         retryCount: maxAutoRetries,
-        buildPrompt: (batchPrompt, count) => providerEditPrompt(batchPrompt, count, Boolean(maskDataUrl), editIntent),
+        buildPrompt: (batchPrompt, count) => providerEditPrompt(
+          batchPrompt,
+          count,
+          Boolean(maskDataUrl),
+          editIntent,
+          drawingReference,
+          imageMarkupReference
+        ),
         onResponseJson: (value) => {
           responseJson = value;
         },
@@ -2975,7 +3090,7 @@ api.post("/images/edit", async (c) => {
               imagePrompt,
               "edit",
               size,
-              quality,
+              result.actualQuality || quality,
               result.provider.id,
               saved.file.mimeType,
               primarySourceImage?.id ?? null,
@@ -2997,6 +3112,7 @@ api.post("/images/edit", async (c) => {
             insertMessage(user.id, sessionId, "assistant", "已完成图片编辑", saved.id, {
               mode: "edit",
               jobId,
+              ...imageExecutionMessageMetadata(result),
               parentImageId: primarySourceImage?.id ?? null,
               sourceAssetIds,
               sourceReferenceIds,

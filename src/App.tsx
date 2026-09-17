@@ -27,7 +27,7 @@ export default function App() {
     try {
       const target = new URL(next, window.location.origin);
       if (target.origin !== window.location.origin) return "";
-      const allowedPages = ["/", "/cases", "/assets", "/images", "/prompt-templates", "/help"];
+      const allowedPages = ["/", "/cases", "/assets", "/images", "/image-provenance", "/prompt-templates", "/help"];
       if (!allowedPages.includes(target.pathname) && target.pathname !== "/oauth/authorize") return "";
       return `${target.pathname}${target.search}`;
     } catch {

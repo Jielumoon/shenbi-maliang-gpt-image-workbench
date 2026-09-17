@@ -696,6 +696,63 @@
     padding-left: 11px;
   }
 
+  .image-editor-composer:not(.input-expanded) {
+    grid-template-columns: minmax(0, 1fr) 38px;
+    grid-template-rows: minmax(38px, auto) auto;
+    align-items: end;
+    row-gap: 8px;
+    border-radius: 22px;
+  }
+
+  .image-editor-composer:not(.input-expanded):has(.image-editor-composer-context) {
+    grid-template-rows: auto minmax(38px, auto) auto;
+  }
+
+  .image-editor-composer:not(.input-expanded) .image-editor-composer-context {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .image-editor-composer:not(.input-expanded):not(:has(.image-editor-composer-context)) .image-editor-textarea-shell {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .image-editor-composer:not(.input-expanded):has(.image-editor-composer-context) .image-editor-textarea-shell {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .image-editor-composer:not(.input-expanded):not(:has(.image-editor-composer-context)) .image-editor-composer-tools,
+  .image-editor-composer:not(.input-expanded):not(:has(.image-editor-composer-context)) .editor-send-btn {
+    grid-row: 2;
+  }
+
+  .image-editor-composer:not(.input-expanded):has(.image-editor-composer-context) .image-editor-composer-tools,
+  .image-editor-composer:not(.input-expanded):has(.image-editor-composer-context) .editor-send-btn {
+    grid-row: 3;
+  }
+
+  .image-editor-composer:not(.input-expanded) .image-editor-composer-tools {
+    grid-column: 1;
+  }
+
+  .image-editor-composer:not(.input-expanded) .editor-send-btn {
+    grid-column: 2;
+  }
+
+  .image-editor-composer-tools {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .image-editor-composer-tools::-webkit-scrollbar {
+    display: none;
+  }
+
   .image-editor-composer.has-preview {
     padding: 9px;
   }

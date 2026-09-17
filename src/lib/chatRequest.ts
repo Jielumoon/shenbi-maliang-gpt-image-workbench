@@ -1,6 +1,8 @@
 import type { AssetItem, CaseMaterialItem, Message, MessageSourceReferenceImage } from "../types";
 import type { ImageAnnotation, ImageEditIntent } from "./imageAnnotations";
 import type { ImageBackgroundOption, TransparentImageOutputFormat } from "./imageBackground";
+import { isDrawingReferenceName } from "./drawingReference";
+import type { ImageModelId, ImageQuality } from "./imageModels";
 
 export type SubmitRequest = {
   clientRequestId: string;
@@ -10,7 +12,9 @@ export type SubmitRequest = {
   providerId?: string;
   prompt: string;
   language?: string;
+  model?: ImageModelId;
   size?: string;
+  quality?: ImageQuality;
   n?: number;
   background?: ImageBackgroundOption;
   outputFormat?: TransparentImageOutputFormat;
@@ -20,6 +24,8 @@ export type SubmitRequest = {
   sourceCaseItemIds?: string[];
   sourceReferenceIds?: string[];
   sourceInlineImages?: Array<{ id?: string; name?: string; dataUrl: string }>;
+  drawingReference?: boolean;
+  imageMarkupReference?: boolean;
   referenceAssetId?: string;
   maskDataUrl?: string;
   editIntent?: ImageEditIntent;
@@ -153,6 +159,8 @@ export function sourceSnapshotFromMessage(message: Message) {
   const primaryImageReference = referenceImageFromMessage(message, sourceImageIds);
   const materialReferences = uniqueReferenceImages([...sourceReferenceAssetSnapshots, ...sourceCaseReferences, ...assetReferences]);
   const references = uniqueReferenceImages([...(primaryImageReference ? [primaryImageReference] : []), ...materialReferences]);
+  const drawingReference = message.metadata?.drawingReference === true
+    || materialReferences.some((reference) => isDrawingReferenceName(reference.name));
 
   return {
     sourceImageIds,
@@ -165,6 +173,7 @@ export function sourceSnapshotFromMessage(message: Message) {
     caseReferences: sourceCaseReferences,
     materialReferences,
     references,
+    drawingReference,
     hideReference: message.metadata?.hideReference === true
   };
 }

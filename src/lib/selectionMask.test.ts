@@ -3,6 +3,7 @@ import {
   DEFAULT_BRUSH_PREVIEW_ANCHOR,
   brushPreviewMetrics,
   brushSizeRatioFromDisplayPixels,
+  centeredBrushCursorOffset,
   renderMaskStroke,
   renderSelectionOverlay,
   selectionPreviewCanvasSize,
@@ -10,6 +11,14 @@ import {
 } from "./selectionMask";
 
 describe("remove brush preview", () => {
+  test("keeps the cursor centered while its diameter changes", () => {
+    const small = centeredBrushCursorOffset(200, 150, 80);
+    const large = centeredBrushCursorOffset(200, 150, 160);
+
+    expect({ x: small.x + 40, y: small.y + 40 }).toEqual({ x: 200, y: 150 });
+    expect({ x: large.x + 80, y: large.y + 80 }).toEqual({ x: 200, y: 150 });
+  });
+
   test("starts at the image center and uses the same diameter as the mask brush", () => {
     const ratio = brushSizeRatioFromDisplayPixels(96, 800, 600);
     expect(brushPreviewMetrics(DEFAULT_BRUSH_PREVIEW_ANCHOR, ratio, 800, 600)).toEqual({

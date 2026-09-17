@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEventHandler, type RefObject } from "react";
 import {
   ArrowUp,
+  Brush,
+  BrushCleaning,
+  Check,
   ChevronDown,
   ChevronUp,
   Eraser,
   ImageIcon,
+  ImageOff,
   Lightbulb,
   Maximize2,
   Minimize2,
   MessageCircleMore,
   MessageCirclePlus,
-  Minus,
   Plus,
   Redo2,
   RotateCcw,
@@ -23,20 +26,91 @@ import {
 } from "lucide-react";
 import { ImageDownloadMenu } from "./ImageDownloadMenu";
 import { ImageLightbox, type ImageLightboxState } from "./ImageLightbox";
-import { EditorSizePicker, ImageCountStepper } from "./ImageOptionPickers";
+import { EditorSizePicker, ImageCountStepper, ModelPicker, QualityPicker } from "./ImageOptionPickers";
 import { ImageZoomSlider } from "./ImageZoomSlider";
 import { MaterialPickerDrawer } from "./MaterialPicker";
 import { CheckerboardImage } from "./CheckerboardImage";
 import { useI18n } from "../i18n";
 import { cx } from "../lib/cx";
-import type { SizeOption } from "../lib/imageOptions";
+import type { QualityOption, SizeOption } from "../lib/imageOptions";
+import type { ImageModelId, ImageQuality } from "../lib/imageModels";
 import { formatImageAnnotationDisplayText, type ImageEditIntent } from "../lib/imageAnnotations";
-import {
-  BRUSH_MAX_SIZE,
-  BRUSH_MIN_SIZE,
-  BRUSH_SIZE_STEP
-} from "../lib/selectionMask";
+import { shouldSubmitComposerOnEnter } from "../lib/editorInput";
 import type { AssetItem, WorkImage } from "../types";
+import { useComposerTextareaAutosize } from "../hooks/useComposerTextareaAutosize";
+import { useFloatingComposerExpansion } from "../hooks/useFloatingComposerExpansion";
+
+export type ImageEditorMode = ImageEditIntent | "markup";
+export type ImageMarkupZoomValue = "fit" | number;
+
+const IMAGE_MARKUP_ZOOM_OPTIONS: ImageMarkupZoomValue[] = ["fit", 25, 50, 75, 100, 125, 150, 200, 300];
+
+function ImageMarkupZoomMenu({
+  value,
+  onChange
+}: {
+  value: ImageMarkupZoomValue;
+  onChange: (value: ImageMarkupZoomValue) => void;
+}) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const labelFor = (option: ImageMarkupZoomValue) => option === "fit" ? t("imageEditor.markupZoomFit") : `${option}%`;
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="image-editor-markup-zoom">
+      <button
+        type="button"
+        className="image-editor-markup-zoom-trigger"
+        aria-label={t("imageEditor.markupZoom")}
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span>{labelFor(value)}</span>
+        <ChevronDown size={16} className={cx(open && "open")} />
+      </button>
+      {open ? (
+        <div className="image-editor-markup-zoom-menu" role="menu" aria-label={t("imageEditor.markupZoom")}>
+          {IMAGE_MARKUP_ZOOM_OPTIONS.map((option) => {
+            const active = option === value;
+            return (
+              <button
+                key={option}
+                type="button"
+                role="menuitemradio"
+                aria-checked={active}
+                className={cx(active && "active")}
+                onClick={() => {
+                  onChange(option);
+                  setOpen(false);
+                }}
+              >
+                <span>{labelFor(option)}</span>
+                {active ? <Check size={16} /> : null}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export type EditorComposerPreview = {
   id: string;
@@ -50,11 +124,10 @@ export type EditorComposerPreview = {
 type ImageEditorTopbarProps = {
   activeImage: WorkImage;
   downloadBaseName?: string;
-  brushRangeStyle: CSSProperties;
-  brushSize: number;
   hasSelection: boolean;
   isSubmitting: boolean;
-  mode: ImageEditIntent;
+  mode: ImageEditorMode;
+  markupZoomValue: ImageMarkupZoomValue;
   redoStrokeCount: number;
   selectedSize: string;
   sizeOptions: SizeOption[];
@@ -66,15 +139,14 @@ type ImageEditorTopbarProps = {
   previewZoomMin?: number;
   previewZoomValue?: number;
   showPreviewControls?: boolean;
-  onAdjustBrushSize: (delta: number) => void;
-  onBrushSizeChange: (value: number) => void;
   onClearSelection: () => void;
   onClose: () => void;
-  onEnterMode: (mode: "annotation" | "remove") => void;
+  onEnterMode: (mode: "markup" | "annotation" | "remove") => void;
   onExitMode: () => void;
   onLockedRequest: () => void;
+  onMarkupZoomChange: (value: ImageMarkupZoomValue) => void;
+  onRemoveBackground: () => void;
   onRemoveSubmit: () => void;
-  onBrushPreviewChange: (active: boolean) => void;
   onPickSize: (option: SizeOption) => void;
   onPreviewOriginalSize?: () => void;
   onPreviewReset?: () => void;
@@ -90,11 +162,10 @@ type ImageEditorTopbarProps = {
 export function ImageEditorTopbar({
   activeImage,
   downloadBaseName,
-  brushRangeStyle,
-  brushSize,
   hasSelection,
   isSubmitting,
   mode,
+  markupZoomValue,
   redoStrokeCount,
   selectedSize,
   sizeOptions,
@@ -106,15 +177,14 @@ export function ImageEditorTopbar({
   previewZoomMin,
   previewZoomValue,
   showPreviewControls,
-  onAdjustBrushSize,
-  onBrushSizeChange,
   onClearSelection,
   onClose,
   onEnterMode,
   onExitMode,
   onLockedRequest,
+  onMarkupZoomChange,
+  onRemoveBackground,
   onRemoveSubmit,
-  onBrushPreviewChange,
   onPickSize,
   onPreviewOriginalSize,
   onPreviewReset,
@@ -127,6 +197,7 @@ export function ImageEditorTopbar({
   onUndoStroke
 }: ImageEditorTopbarProps) {
   const { t } = useI18n();
+  const markupMode = mode === "markup";
   const annotationMode = mode === "annotation";
   const removeMode = mode === "remove";
   const modeActive = mode !== "standard";
@@ -138,7 +209,9 @@ export function ImageEditorTopbar({
           <X size={20} />
         </button>
         <span>
-          {annotationMode
+          {markupMode
+            ? t("imageEditor.markupTitle")
+            : annotationMode
             ? t("imageEditor.annotationTitle")
             : removeMode
               ? t("imageEditor.removeTitle")
@@ -187,6 +260,7 @@ export function ImageEditorTopbar({
       ) : null}
       {removeMode ? (
         <div className="image-editor-actions">
+          <ImageMarkupZoomMenu value={markupZoomValue} onChange={onMarkupZoomChange} />
           <button type="button" className="editor-icon-btn" onClick={onUndoStroke} disabled={strokeCount === 0} aria-label={t("imageEditor.undo")}>
             <Undo2 size={20} />
           </button>
@@ -196,42 +270,6 @@ export function ImageEditorTopbar({
           <button type="button" className="editor-icon-btn" onClick={onClearSelection} disabled={!hasSelection} aria-label={t("common.clear")}>
             <Trash2 size={20} />
           </button>
-          <label className="brush-size-control">
-            <button
-              type="button"
-              className="brush-step-btn"
-              onClick={() => onAdjustBrushSize(-BRUSH_SIZE_STEP)}
-              disabled={brushSize <= BRUSH_MIN_SIZE}
-              aria-label={t("imageEditor.decreaseBrush")}
-            >
-              <Minus size={20} />
-            </button>
-            <input
-              type="range"
-              min={BRUSH_MIN_SIZE}
-              max={BRUSH_MAX_SIZE}
-              step={BRUSH_SIZE_STEP}
-              value={brushSize}
-              style={brushRangeStyle}
-              onChange={(event) => onBrushSizeChange(Number(event.target.value))}
-              onPointerDown={() => onBrushPreviewChange(true)}
-              onPointerUp={() => onBrushPreviewChange(false)}
-              onPointerCancel={() => onBrushPreviewChange(false)}
-              onLostPointerCapture={() => onBrushPreviewChange(false)}
-              onBlur={() => onBrushPreviewChange(false)}
-              aria-label={t("imageEditor.brushSize")}
-            />
-            <button
-              type="button"
-              className="brush-step-btn"
-              onClick={() => onAdjustBrushSize(BRUSH_SIZE_STEP)}
-              disabled={brushSize >= BRUSH_MAX_SIZE}
-              aria-label={t("imageEditor.increaseBrush")}
-            >
-              <Plus size={20} />
-            </button>
-            <span>{brushSize}px</span>
-          </label>
           <button
             type="button"
             className="editor-primary-btn"
@@ -245,17 +283,35 @@ export function ImageEditorTopbar({
             {t("common.cancel")}
           </button>
         </div>
+      ) : markupMode ? (
+        <div className="image-editor-actions">
+          <ImageMarkupZoomMenu value={markupZoomValue} onChange={onMarkupZoomChange} />
+        </div>
       ) : annotationMode ? (
         <div className="image-editor-actions">
+          <ImageMarkupZoomMenu value={markupZoomValue} onChange={onMarkupZoomChange} />
           <button type="button" className="editor-text-btn" onClick={onExitMode}>
             {t("common.cancel")}
           </button>
         </div>
       ) : (
         <div className="image-editor-actions">
+          <button type="button" className="editor-text-btn" onClick={() => onEnterMode("markup")}>
+            <Brush size={20} />
+            {t("imageEditor.markup")}
+          </button>
           <button type="button" className="editor-text-btn" onClick={() => onEnterMode("annotation")}>
             <MessageCirclePlus size={20} />
             {t("imageEditor.annotation")}
+          </button>
+          <button
+            type="button"
+            className="editor-text-btn"
+            onClick={isSubmitting ? onLockedRequest : onRemoveBackground}
+            aria-disabled={isSubmitting}
+          >
+            <ImageOff size={20} />
+            {t("imageEditor.removeBackground")}
           </button>
           <button type="button" className="editor-text-btn" onClick={() => onEnterMode("remove")}>
             <Eraser size={20} />
@@ -347,18 +403,25 @@ type ImageEditorComposerProps = {
   annotationCount?: number;
   annotationMode?: boolean;
   annotationTooltipsVisible?: boolean;
+  markupCount?: number;
+  markupMode?: boolean;
   assets?: { assets: AssetItem[] };
   composerWrapRef?: RefObject<HTMLElement | null>;
   editorError: string;
   effectiveImageCount: number;
   imageCount: number;
+  imageModel: ImageModelId;
   isSubmitting: boolean;
   materialPickerOpen: boolean;
   previews: EditorComposerPreview[];
   prompt: string;
+  quality: ImageQuality;
+  qualityOptions: QualityOption[];
   selectedAssets: AssetItem[];
   onPromptChange: (value: string) => void;
   onImageCountChange: (value: number) => void;
+  onImageModelChange: (value: ImageModelId) => void;
+  onQualityChange: (value: ImageQuality) => void;
   onLockedRequest: () => void;
   onClearAnnotations: () => void;
   onToggleAnnotationTooltips: () => void;
@@ -373,18 +436,25 @@ export function ImageEditorComposer({
   annotationCount = 0,
   annotationMode = false,
   annotationTooltipsVisible = false,
+  markupCount = 0,
+  markupMode = false,
   assets,
   composerWrapRef,
   editorError,
   effectiveImageCount,
   imageCount,
+  imageModel,
   isSubmitting,
   materialPickerOpen,
   previews,
   prompt,
+  quality,
+  qualityOptions,
   selectedAssets,
   onPromptChange,
   onImageCountChange,
+  onImageModelChange,
+  onQualityChange,
   onLockedRequest,
   onClearAnnotations,
   onToggleAnnotationTooltips,
@@ -398,11 +468,42 @@ export function ImageEditorComposer({
   const [previewState, setPreviewState] = useState<ImageLightboxState | null>(null);
   const [quickMenuOpen, setQuickMenuOpen] = useState(false);
   const quickMenuRef = useRef<HTMLDivElement | null>(null);
+  const composerFormRef = useRef<HTMLFormElement | null>(null);
+  const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const clearInputCollapsePendingRef = useRef(false);
   const previewItems = previews.map((preview) => ({
     url: preview.previewUrl ?? preview.url,
     thumbnailUrl: preview.url,
     name: preview.name
   }));
+  const {
+    collapsedHeight: inputCollapsedHeight,
+    expanded: inputExpanded,
+    style: inputExpansionStyle,
+    toggle: toggleInputExpansion
+  } = useFloatingComposerExpansion({ formRef: composerFormRef, textareaRef: promptTextareaRef });
+  const {
+    collapsedHeight: inputCollapsedTextareaHeight,
+    expandable: inputExpandable,
+    multiline: inputMultiline
+  } = useComposerTextareaAutosize({
+    draftPrompt: prompt,
+    expanded: inputExpanded,
+    previewCount: previews.length,
+    textareaRef: promptTextareaRef
+  });
+  const hasClearablePrompt = Boolean(prompt.trim());
+
+  useEffect(() => {
+    if (!clearInputCollapsePendingRef.current) return;
+    if (!inputExpanded) {
+      clearInputCollapsePendingRef.current = false;
+      return;
+    }
+    if (hasClearablePrompt || inputMultiline) return;
+    clearInputCollapsePendingRef.current = false;
+    void toggleInputExpansion(inputCollapsedTextareaHeight);
+  }, [hasClearablePrompt, inputCollapsedTextareaHeight, inputExpanded, inputMultiline, toggleInputExpansion]);
 
   useEffect(() => {
     if (!quickMenuOpen) return;
@@ -456,13 +557,20 @@ export function ImageEditorComposer({
           {t("imageEditor.imageCountOverride", { count: effectiveImageCount })}
         </div>
       ) : null}
+      {inputExpanded && inputCollapsedHeight > 0 ? (
+        <div className="image-editor-composer-placeholder" style={{ height: inputCollapsedHeight }} aria-hidden="true" />
+      ) : null}
       <form
+        ref={composerFormRef}
         className={cx(
           "image-editor-composer",
           previews.length > 0 && "has-preview",
           annotationMode && "is-annotation",
-          annotationMode && annotationCount > 0 && "has-annotations"
+          annotationMode && annotationCount > 0 && "has-annotations",
+          inputMultiline && "input-multiline",
+          inputExpanded && "input-expanded"
         )}
+        style={inputExpansionStyle}
         onSubmit={(event) => {
           if (isSubmitting) {
             event.preventDefault();
@@ -472,45 +580,49 @@ export function ImageEditorComposer({
           onSubmit(event);
         }}
       >
-        {annotationMode && annotationCount > 0 ? (
-          <div className="image-editor-annotation-summary">
-            <button
-              type="button"
-              className="image-editor-annotation-toggle"
-              aria-expanded={annotationTooltipsVisible}
-              onClick={onToggleAnnotationTooltips}
-            >
-              <MessageCircleMore size={16} />
-              <span className="image-editor-annotation-count">{t("imageEditor.annotationCount", { count: annotationCount })}</span>
-            </button>
-            <button
-              type="button"
-              className="image-editor-annotation-clear"
-              aria-label={t("imageEditor.clearAnnotations")}
-              title={t("imageEditor.clearAnnotations")}
-              onClick={onClearAnnotations}
-            >
-              <X size={17} />
-            </button>
-          </div>
-        ) : null}
-        {previews.length > 0 ? (
-          <div className="image-editor-composer-preview-row composer-preview-row">
-            {previews.map((preview, index) => (
-              <figure key={preview.id} className="composer-preview-card" title={preview.title}>
+        {(annotationMode && annotationCount > 0) || previews.length > 0 ? (
+          <div className="image-editor-composer-context">
+            {annotationMode && annotationCount > 0 ? (
+              <div className="image-editor-annotation-summary">
                 <button
                   type="button"
-                  className="composer-preview-open"
-                  onClick={() => setPreviewState({ items: previewItems, index })}
-                  aria-label={t("composer.previewNamed", { name: preview.name })}
+                  className="image-editor-annotation-toggle"
+                  aria-expanded={annotationTooltipsVisible}
+                  onClick={onToggleAnnotationTooltips}
                 >
-                  <CheckerboardImage src={preview.url} alt={preview.name} />
+                  <MessageCircleMore size={16} />
+                  <span className="image-editor-annotation-count">{t("imageEditor.annotationCount", { count: annotationCount })}</span>
                 </button>
-                <button type="button" className="composer-preview-remove" onClick={preview.onRemove} aria-label={t("composer.removeNamed", { name: preview.name })}>
-                  <X size={15} />
+                <button
+                  type="button"
+                  className="image-editor-annotation-clear"
+                  aria-label={t("imageEditor.clearAnnotations")}
+                  title={t("imageEditor.clearAnnotations")}
+                  onClick={onClearAnnotations}
+                >
+                  <X size={17} />
                 </button>
-              </figure>
-            ))}
+              </div>
+            ) : null}
+            {previews.length > 0 ? (
+              <div className="image-editor-composer-preview-row composer-preview-row">
+                {previews.map((preview, index) => (
+                  <figure key={preview.id} className="composer-preview-card" title={preview.title}>
+                    <button
+                      type="button"
+                      className="composer-preview-open"
+                      onClick={() => setPreviewState({ items: previewItems, index })}
+                      aria-label={t("composer.previewNamed", { name: preview.name })}
+                    >
+                      <CheckerboardImage src={preview.url} alt={preview.name} />
+                    </button>
+                    <button type="button" className="composer-preview-remove" onClick={preview.onRemove} aria-label={t("composer.removeNamed", { name: preview.name })}>
+                      <X size={15} />
+                    </button>
+                  </figure>
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : null}
         <div className="image-editor-composer-tools">
@@ -538,18 +650,66 @@ export function ImageEditorComposer({
               </div>
             ) : null}
           </div>
+          <ModelPicker value={imageModel} onChange={onImageModelChange} />
+          <QualityPicker value={quality} options={qualityOptions} onChange={(value) => onQualityChange(value as ImageQuality)} />
           <ImageCountStepper value={imageCount} onChange={onImageCountChange} />
+          <button
+            type="button"
+            className={cx("editor-composer-clear composer-tool-btn", hasClearablePrompt && "is-visible")}
+            onClick={() => {
+              if (!hasClearablePrompt) return;
+              clearInputCollapsePendingRef.current = inputExpanded;
+              onPromptChange("");
+              if (!inputExpanded) window.setTimeout(() => promptTextareaRef.current?.focus(), 0);
+            }}
+            disabled={!hasClearablePrompt}
+            aria-hidden={!hasClearablePrompt}
+            tabIndex={hasClearablePrompt ? 0 : -1}
+            aria-label={t("composer.clearInput")}
+            title={t("composer.clearInput")}
+            data-tooltip={t("composer.clearInput")}
+          >
+            <BrushCleaning size={15} />
+          </button>
         </div>
-        <input
-          value={prompt}
-          onChange={(event) => onPromptChange(event.target.value)}
-          onFocus={focusEditorInput}
-          placeholder={annotationMode ? t("imageEditor.annotationExtraPlaceholder") : t("imageEditor.promptPlaceholder")}
-        />
+        <div className="image-editor-textarea-shell">
+          <textarea
+            ref={promptTextareaRef}
+            value={prompt}
+            rows={1}
+            onChange={(event) => onPromptChange(event.target.value)}
+            onFocus={focusEditorInput}
+            onKeyDown={(event) => {
+              if (!shouldSubmitComposerOnEnter(event.key, event.shiftKey, event.nativeEvent.isComposing)) return;
+              event.preventDefault();
+              event.currentTarget.form?.requestSubmit();
+            }}
+            placeholder={annotationMode
+              ? t("imageEditor.annotationExtraPlaceholder")
+              : markupMode
+                ? t("imageEditor.markupExtraPlaceholder")
+                : t("imageEditor.promptPlaceholder")}
+          />
+          {inputExpandable || inputExpanded ? (
+            <button
+              type="button"
+              className="image-editor-input-expand-btn"
+              onClick={() => {
+                setQuickMenuOpen(false);
+                void toggleInputExpansion(inputCollapsedTextareaHeight);
+              }}
+              aria-label={t(inputExpanded ? "composer.inputCollapse" : "composer.inputExpand")}
+              aria-expanded={inputExpanded}
+              title={t(inputExpanded ? "composer.inputCollapse" : "composer.inputExpand")}
+            >
+              {inputExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            </button>
+          ) : null}
+        </div>
         <button
           type="submit"
           className="editor-send-btn"
-          disabled={annotationMode ? annotationCount === 0 : !prompt.trim()}
+          disabled={annotationMode ? annotationCount === 0 : markupMode ? markupCount === 0 : !prompt.trim()}
           aria-disabled={isSubmitting}
           aria-label={t("composer.send")}
         >

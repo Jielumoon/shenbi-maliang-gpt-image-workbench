@@ -147,6 +147,34 @@ describe("session share lookup rate limit", () => {
 });
 
 describe("shared message projection", () => {
+  test("keeps display-safe image execution metadata without exposing provider or route details", () => {
+    const metadata = safeSharedMessageMetadata({
+      mode: "generation",
+      jobId: "job_private",
+      requestedModel: "gpt-image-2.5-sunburst",
+      actualModel: "gpt-image-2.5-sunburst",
+      actualLanguageModel: "gpt-6-astra",
+      requestedQuality: "max",
+      actualQuality: "max",
+      providerId: "provider_private",
+      actualRouteMode: "responses",
+      modelFallbackReason: "internal routing detail"
+    }, "shared-job-1");
+
+    expect(metadata).toEqual({
+      mode: "generation",
+      jobId: "shared-job-1",
+      requestedModel: "gpt-image-2.5-sunburst",
+      actualModel: "gpt-image-2.5-sunburst",
+      actualLanguageModel: "gpt-6-astra",
+      requestedQuality: "max",
+      actualQuality: "max"
+    });
+    expect(JSON.stringify(metadata)).not.toContain("provider_private");
+    expect(JSON.stringify(metadata)).not.toContain("responses");
+    expect(JSON.stringify(metadata)).not.toContain("internal routing detail");
+  });
+
   test("flattens branch and revision metadata into the main sequence", () => {
     const rawMetadata = {
       mode: "edit",

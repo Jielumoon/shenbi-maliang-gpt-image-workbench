@@ -72,7 +72,8 @@ import type {
   StarterDailyCopy,
   Team
 } from "../../types";
-import type { ConfigAssetReviewItem, ConfigCaseReviewItem } from "../../api/config";
+import type { ConfigAssetReviewItem, ConfigCaseReviewItem, ProviderModelsResult } from "../../api/config";
+import { IMAGE_MODEL_IDS } from "../../lib/imageModels";
 import { ConfirmDialog, CustomSelect, PromptDialog, useToast } from "../../ui";
 import {
   ConfigHeader,
@@ -1279,6 +1280,112 @@ function providerDisplayName(provider: ProviderConfig) {
   return provider.name;
 }
 
+const MANUAL_PROVIDER_MODEL_VALUE = "__manual_provider_model__";
+const RECOMMENDED_RESPONSES_MODELS = [
+  "gpt-6-astra",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+  "gpt-5.5"
+];
+
+function providerModelDescription(model: string, kind: "image" | "responses") {
+  if (kind === "image") {
+    if (model === "gpt-image-2.5-flare") return "速度快、画质好，适合日常创作";
+    if (model === "gpt-image-2.5-sunburst") return "画质更高、编辑更准，适合专业创作";
+    if (model === "gpt-image-2") return "画质稳定、细节清晰，适合常规创作";
+    return "当前渠道返回的图片模型";
+  }
+  if (model === "gpt-6-astra") return "综合能力最强，官方 GPT Image 2.5 示例使用";
+  if (model === "gpt-5.6-sol") return "适合复杂、专业的创作任务";
+  if (model === "gpt-5.6-terra") return "效果、速度和成本更均衡";
+  if (model === "gpt-5.6-luna") return "速度快，适合高频日常任务";
+  if (model === "gpt-5.5") return "兼容当前 Responses 生图链路";
+  return "当前渠道返回的语言模型";
+}
+
+function providerModelOptions(
+  models: string[],
+  current: string,
+  kind: "image" | "responses",
+  catalogLoaded = false
+) {
+  const recommended = kind === "image" ? [...IMAGE_MODEL_IDS] : RECOMMENDED_RESPONSES_MODELS;
+  const rank = new Map(recommended.map((model, index) => [model, index]));
+  const unique = Array.from(new Set(models.map((model) => model.trim()).filter(Boolean))).sort((left, right) => {
+    const leftRank = rank.get(left) ?? Number.MAX_SAFE_INTEGER;
+    const rightRank = rank.get(right) ?? Number.MAX_SAFE_INTEGER;
+    return leftRank - rightRank || left.localeCompare(right, undefined, { numeric: true });
+  });
+  const normalizedCurrent = current.trim();
+  if (normalizedCurrent && !unique.includes(normalizedCurrent)) unique.unshift(normalizedCurrent);
+  return [
+    ...unique.map((model) => {
+      const missingCurrent = catalogLoaded && normalizedCurrent === model && !models.includes(model);
+      return {
+        value: model,
+        label: model,
+        description: missingCurrent ? "当前已保存，但本次渠道模型目录未返回" : providerModelDescription(model, kind),
+        labelNoTranslate: true,
+        group: missingCurrent
+          ? "当前配置 · 渠道未返回"
+          : rank.has(model)
+            ? "推荐模型"
+            : "渠道返回",
+        descriptionNoTranslate: false
+      };
+    }),
+    {
+      value: MANUAL_PROVIDER_MODEL_VALUE,
+      label: "手动填写…",
+      description: "输入渠道未列出的模型 ID",
+      group: "其他"
+    }
+  ];
+}
+
+function ProviderModelControl({
+  value,
+  options,
+  manual,
+  onChange,
+  onManualChange
+}: {
+  value: string;
+  options: ReturnType<typeof providerModelOptions>;
+  manual: boolean;
+  onChange: (value: string) => void;
+  onManualChange: (manual: boolean) => void;
+}) {
+  if (manual || options.length <= 1) {
+    return (
+      <div className="provider-model-control">
+        <input value={value} onChange={(event) => onChange(event.target.value)} placeholder="输入模型 ID" />
+        {options.length > 1 ? (
+          <button className="secondary-btn" type="button" onClick={() => onManualChange(false)}>
+            选择模型
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+  return (
+    <CustomSelect
+      value={value}
+      onChange={(model) => {
+        if (model === MANUAL_PROVIDER_MODEL_VALUE) {
+          onManualChange(true);
+          return;
+        }
+        onChange(model);
+      }}
+      options={options}
+      placeholder="选择模型"
+      menuWidth={430}
+    />
+  );
+}
+
 function ProviderAccountMultiSelect({
   accounts,
   value,
@@ -1327,8 +1434,10 @@ function ProviderDialog({
   accounts,
   error,
   saving,
+  initialModelCatalog,
   onClose,
-  onSubmit
+  onSubmit,
+  onModelCatalogChange
 }: {
   mode: "create" | "edit";
   provider: ProviderConfig;
@@ -1336,10 +1445,16 @@ function ProviderDialog({
   accounts: ImageAccount[];
   error?: Error | null;
   saving: boolean;
+  initialModelCatalog: ProviderModelsResult | null;
   onClose: () => void;
   onSubmit: (provider: ProviderConfig) => void;
+  onModelCatalogChange: (provider: ProviderConfig, catalog: ProviderModelsResult | null) => void;
 }) {
+  const { showToast } = useToast();
   const [form, setForm] = useState<ProviderConfig>(() => normalizeProviderForm(provider));
+  const [modelCatalog, setModelCatalog] = useState<ProviderModelsResult | null>(initialModelCatalog);
+  const [manualImageModel, setManualImageModel] = useState(false);
+  const [manualResponsesModel, setManualResponsesModel] = useState(Boolean(initialModelCatalog && initialModelCatalog.responsesModels.length === 0));
   const isChatgptWeb = form.channel === "chatgpt_web";
   const isApi = form.channel === "api";
   const isCpa = form.channel === "cpa";
@@ -1349,7 +1464,15 @@ function ProviderDialog({
     setForm((value) => ({ ...value, ...patchValue }));
   }
 
+  function patchConnection(patchValue: Partial<ProviderConfig>) {
+    setModelCatalog(null);
+    onModelCatalogChange(form, null);
+    patch(patchValue);
+  }
+
   function patchChannel(channel: ProviderConfig["channel"]) {
+    setModelCatalog(null);
+    onModelCatalogChange(form, null);
     setForm((value) =>
       providerWithChannelDefaults(value, channel, {
         preserveIdentity: mode === "edit",
@@ -1357,6 +1480,34 @@ function ProviderDialog({
       })
     );
   }
+
+  const discoveredImageModels = modelCatalog
+    ? modelCatalog.imageModels.length > 0
+      ? modelCatalog.imageModels
+      : [...IMAGE_MODEL_IDS]
+    : [];
+  const discoveredResponsesModels = modelCatalog?.responsesModels ?? [];
+  const imageModelOptions = useMemo(
+    () => providerModelOptions(discoveredImageModels, form.model, "image", Boolean(modelCatalog)),
+    [discoveredImageModels, form.model, modelCatalog]
+  );
+  const responsesModelOptions = useMemo(
+    () => providerModelOptions(discoveredResponsesModels, form.responsesModel, "responses", Boolean(modelCatalog)),
+    [discoveredResponsesModels, form.responsesModel, modelCatalog]
+  );
+  const fetchModels = useMutation({
+    mutationFn: () => configApi.providerModels(form),
+    onSuccess: (data) => {
+      setModelCatalog(data);
+      onModelCatalogChange(form, data);
+      setManualImageModel(false);
+      setManualResponsesModel(data.responsesModels.length === 0);
+      showToast(`已获取 ${data.models.length} 个模型：图片 ${data.imageModels.length} 个，语言 ${data.responsesModels.length} 个`);
+    },
+    onError: (error) => {
+      showToast(error instanceof Error ? error.message : "模型列表获取失败", "error");
+    }
+  });
 
   return (
     <div className="modal-backdrop">
@@ -1403,7 +1554,7 @@ function ProviderDialog({
           ) : null}
           <label>
             服务地址
-            <input value={form.baseUrl} onChange={(event) => patch({ baseUrl: event.target.value })} />
+            <input value={form.baseUrl} onChange={(event) => patchConnection({ baseUrl: event.target.value })} />
           </label>
           <div className="provider-switch-row">
             <div className="switch-row">
@@ -1411,7 +1562,7 @@ function ProviderDialog({
               <SwitchControl
                 checked={form.proxyEnabled}
                 label={form.proxyEnabled ? "启用" : "停用"}
-                onChange={(proxyEnabled) => patch({ proxyEnabled })}
+                onChange={(proxyEnabled) => patchConnection({ proxyEnabled })}
               />
             </div>
             <div className="switch-row">
@@ -1426,7 +1577,7 @@ function ProviderDialog({
           {usesProviderApiKey ? (
             <label>
               API Key 环境变量
-              <input value={form.apiKeyEnv} onChange={(event) => patch({ apiKeyEnv: event.target.value })} />
+              <input value={form.apiKeyEnv} onChange={(event) => patchConnection({ apiKeyEnv: event.target.value })} />
             </label>
           ) : null}
           {usesProviderApiKey ? (
@@ -1434,7 +1585,7 @@ function ProviderDialog({
               API Key
               <input
                 value={form.apiKeyValue}
-                onChange={(event) => patch({ apiKeyValue: event.target.value })}
+                onChange={(event) => patchConnection({ apiKeyValue: event.target.value })}
                 placeholder={isCpa ? "CPA Bearer Key，可留空" : "优先建议使用环境变量"}
               />
             </label>
@@ -1465,7 +1616,7 @@ function ProviderDialog({
               <ProviderAccountMultiSelect
                 accounts={accounts}
                 value={form.webAccountIds}
-                onChange={(webAccountIds) => patch({ webAccountIds })}
+                onChange={(webAccountIds) => patchConnection({ webAccountIds })}
               />
               <small>CPA 同步账号通常只有 OAuth Access Token，可走 Codex Responses；官网会话链路会先访问 ChatGPT 首页自动预热 Cookie，手动 Cookie 只是防护拦截时的备用项。</small>
             </label>
@@ -1475,7 +1626,7 @@ function ProviderDialog({
               备用 Access Token
               <input
                 value={form.apiKeyValue}
-                onChange={(event) => patch({ apiKeyValue: event.target.value })}
+                onChange={(event) => patchConnection({ apiKeyValue: event.target.value })}
                 placeholder="ChatGPT access_token"
               />
             </label>
@@ -1483,20 +1634,20 @@ function ProviderDialog({
           {isChatgptWeb ? (
             <label>
               备用 Account ID
-              <input value={form.webAccountId} onChange={(event) => patch({ webAccountId: event.target.value })} />
+              <input value={form.webAccountId} onChange={(event) => patchConnection({ webAccountId: event.target.value })} />
             </label>
           ) : null}
           {isChatgptWeb ? (
             <label className="wide">
               备用 Cookie（可选）
-              <textarea rows={3} value={form.webCookies} onChange={(event) => patch({ webCookies: event.target.value })} />
+              <textarea rows={3} value={form.webCookies} onChange={(event) => patchConnection({ webCookies: event.target.value })} />
               <small>默认会按参考项目思路预热首页并接住 Set-Cookie；只有遇到网页防护或会话拦截时，才需要从浏览器复制 Cookie 作为兜底。</small>
             </label>
           ) : null}
           {!isChatgptWeb ? (
             <label>
               生成路径
-              <input value={form.generationPath} onChange={(event) => patch({ generationPath: event.target.value })} />
+              <input value={form.generationPath} onChange={(event) => patchConnection({ generationPath: event.target.value })} />
             </label>
           ) : null}
           {!isChatgptWeb ? (
@@ -1508,16 +1659,39 @@ function ProviderDialog({
           {!isChatgptWeb ? (
             <label>
               Responses 路径
-              <input value={form.responsesPath} onChange={(event) => patch({ responsesPath: event.target.value })} />
+              <input value={form.responsesPath} onChange={(event) => patchConnection({ responsesPath: event.target.value })} />
             </label>
           ) : null}
+          <div className="provider-model-toolbar wide">
+            <span>
+              <strong>渠道模型</strong>
+              <small>读取当前渠道的模型目录，再分别选择图片模型和 Responses 主模型。</small>
+            </span>
+            <button className="secondary-btn" type="button" onClick={() => fetchModels.mutate()} disabled={fetchModels.isPending}>
+              <RefreshCw className={fetchModels.isPending ? "spin-icon" : undefined} size={16} />
+              获取模型
+            </button>
+          </div>
           <label>
             图片模型
-            <input value={form.model} onChange={(event) => patch({ model: event.target.value })} />
+            <ProviderModelControl
+              value={form.model}
+              options={imageModelOptions}
+              manual={manualImageModel}
+              onChange={(model) => patch({ model })}
+              onManualChange={setManualImageModel}
+            />
+            <small>{modelCatalog && modelCatalog.imageModels.length === 0 ? "渠道没有返回图片模型，已显示内置 GPT Image 选项。" : "Images API 与 Responses 图片工具使用。"}</small>
           </label>
           <label>
             Responses 主模型
-            <input value={form.responsesModel} onChange={(event) => patch({ responsesModel: event.target.value })} />
+            <ProviderModelControl
+              value={form.responsesModel}
+              options={responsesModelOptions}
+              manual={manualResponsesModel}
+              onChange={(responsesModel) => patch({ responsesModel })}
+              onManualChange={setManualResponsesModel}
+            />
             <small>
               {isChatgptWeb
                 ? "Codex Responses 额度链路使用这个主模型；官网普通额度链路不使用。"
@@ -1571,12 +1745,33 @@ function ProviderDialog({
   );
 }
 
+type ProviderModelCatalogCacheEntry = {
+  signature: string;
+  catalog: ProviderModelsResult;
+};
+
+function providerModelCatalogSignature(provider: ProviderConfig) {
+  return JSON.stringify({
+    channel: provider.channel,
+    baseUrl: provider.baseUrl.trim(),
+    apiKeyEnv: provider.apiKeyEnv.trim(),
+    apiKeyValue: provider.apiKeyValue.trim(),
+    generationPath: provider.generationPath.trim(),
+    responsesPath: provider.responsesPath.trim(),
+    proxyEnabled: provider.proxyEnabled,
+    webAccountId: provider.webAccountId.trim(),
+    webAccountIds: provider.webAccountIds,
+    webCookies: provider.webCookies.trim()
+  });
+}
+
 export function ProvidersPanel() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const providersQuery = useQuery({ queryKey: ["config-providers"], queryFn: configApi.providers });
   const accountsQuery = useQuery({ queryKey: ["config-image-accounts"], queryFn: configApi.imageAccounts });
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
+  const [modelCatalogCache, setModelCatalogCache] = useState<Record<string, ProviderModelCatalogCacheEntry>>({});
   const [channelFilter, setChannelFilter] = useState<ProviderChannelFilter>("all");
   const [dialog, setDialog] = useState<{ mode: "create" | "edit"; provider: ProviderConfig } | null>(null);
   const [removeTarget, setRemoveTarget] = useState<ProviderConfig | null>(null);
@@ -1650,6 +1845,18 @@ export function ProvidersPanel() {
 
   function toggleProvider(provider: ProviderConfig) {
     setSwitchTarget(provider);
+  }
+
+  function updateModelCatalogCache(provider: ProviderConfig, catalog: ProviderModelsResult | null) {
+    setModelCatalogCache((current) => {
+      const next = { ...current };
+      if (catalog) {
+        next[provider.id] = { signature: providerModelCatalogSignature(provider), catalog };
+      } else {
+        delete next[provider.id];
+      }
+      return next;
+    });
   }
 
   return (
@@ -1746,14 +1953,21 @@ export function ProvidersPanel() {
       {save.error ? <div className="form-error">{save.error.message}</div> : null}
       {dialog ? (
         <ProviderDialog
+          key={dialog.provider.id}
           mode={dialog.mode}
           provider={dialog.provider}
           existingProviderIds={providers.map((provider) => provider.id)}
           accounts={accountsQuery.data?.accounts ?? []}
           saving={save.isPending}
           error={save.error}
+          initialModelCatalog={
+            modelCatalogCache[dialog.provider.id]?.signature === providerModelCatalogSignature(dialog.provider)
+              ? modelCatalogCache[dialog.provider.id].catalog
+              : null
+          }
           onClose={() => setDialog(null)}
           onSubmit={saveProviderForm}
+          onModelCatalogChange={updateModelCatalogCache}
         />
       ) : null}
       <ConfirmDialog

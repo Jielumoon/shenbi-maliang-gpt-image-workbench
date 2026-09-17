@@ -10,6 +10,7 @@ import { CaseMaterialPickerModal } from "../components/CaseMaterialPickerModal";
 import { ChatBranchSwitch } from "../components/chat/ChatBranchSwitch";
 import { ChatComposer } from "../components/chat/ChatComposer";
 import { ConversationView } from "../components/chat/ConversationView";
+import { DrawingCanvasDialog } from "../components/DrawingCanvasDialog";
 import { FeatureIntroModal } from "../components/FeatureIntroModal";
 import { ImageEditWorkspace } from "../components/ImageEditWorkspace";
 import { PromptStarter } from "../components/PromptStarter";
@@ -28,11 +29,24 @@ import {
 import { MAIN_CHAT_BRANCH_ID, buildChatRenderState, isServerEchoOfPending } from "../lib/chatRender";
 import { resolveChatSessionTransition } from "../lib/chatSessionTransition";
 import { cx } from "../lib/cx";
+import { isDrawingReferenceName } from "../lib/drawingReference";
 import { type AssetUploadMode } from "../lib/assets";
 import { getAppIntroSlides } from "../lib/featureIntroSlides";
 import { isDefaultCaseItemId } from "../lib/defaultCases";
 import { useI18n, type LocaleCode } from "../i18n";
-import { requestSizeFromSelection, type SizeOption } from "../lib/imageOptions";
+import { buildQualityOptions, requestSizeFromSelection, type SizeOption } from "../lib/imageOptions";
+import {
+  DEFAULT_EDIT_IMAGE_MODEL,
+  DEFAULT_GENERATION_IMAGE_MODEL,
+  DEFAULT_IMAGE_QUALITY,
+  imageModelQualities,
+  isImageQualitySupported,
+  latestConversationImageSelection,
+  normalizeImageModel,
+  normalizeImageQuality,
+  type ImageModelId,
+  type ImageQuality
+} from "../lib/imageModels";
 import {
   imageBackgroundRequestOptions,
   imageBackgroundRequestOptionsFromMetadata,
@@ -49,11 +63,11 @@ import {
   type ImageEditIntent
 } from "../lib/imageAnnotations";
 import { normalizePromptColorSchemeIds } from "../lib/promptColorSchemes";
+import type { DrawingElement } from "../lib/drawingCanvas";
 import { normalizePromptOptimizeStyle, sanitizePromptOptimizeStyleGroups } from "../lib/promptOptimizeStyles";
 import { getTimeGreetingKey } from "../lib/timeGreeting";
 import { workImageFromLibraryCard, workImageFromMessage } from "../lib/workImages";
 import { useComposerPasteAsset } from "../hooks/useComposerPasteAsset";
-import { useComposerTextareaAutosize } from "../hooks/useComposerTextareaAutosize";
 import { useChatScrollJump } from "../hooks/useChatScrollJump";
 import { useChatViewState } from "../hooks/useChatViewState";
 import { GUIDE_KEYS, useGuideSeen } from "../hooks/useGuideSeen";
@@ -74,6 +88,11 @@ type AssetModalTarget =
   | { type: "image"; item: WorkImage }
   | { type: "case"; item: CaseMaterialItem };
 
+type DrawingEditorState = {
+  assetId: string | null;
+  elements: DrawingElement[];
+};
+
 const PROMPT_INPUT_OPTIMIZE_STYLE_STORAGE_KEY = "gpt-image.prompt-input-optimize-style";
 const MESSAGE_REVEAL_STAGGER_MS = 46;
 const MESSAGE_REVEAL_MAX_DELAY_MS = 414;
@@ -89,6 +108,8 @@ type SubmittedDraftSnapshot = {
   imageCount: number;
   size: string;
   background: ImageBackgroundOption;
+  imageModel: ImageModelId;
+  quality: ImageQuality;
   promptInputOptimizeStyle: ComposerSessionDraft["promptInputOptimizeStyle"];
   promptColorSchemeIds: string[];
   promptColorSchemeInjection: string;
@@ -416,6 +437,8 @@ function emptyComposerSessionDraft(): ComposerSessionDraft {
     imageCount: 1,
     size: "",
     background: "auto",
+    imageModel: DEFAULT_GENERATION_IMAGE_MODEL,
+    quality: DEFAULT_IMAGE_QUALITY,
     promptInputOptimizeStyle: "standard",
     promptColorSchemeIds: [],
     promptColorSchemeId: "",
@@ -433,6 +456,8 @@ function hasComposerDraftContent(draft: Pick<
   | "imageCount"
   | "size"
   | "background"
+  | "imageModel"
+  | "quality"
   | "promptInputOptimizeStyle"
   | "promptColorSchemeIds"
   | "promptColorSchemeId"
@@ -446,6 +471,8 @@ function hasComposerDraftContent(draft: Pick<
     || draft.imageCount !== 1
     || draft.size
     || draft.background !== "auto"
+    || draft.imageModel !== DEFAULT_GENERATION_IMAGE_MODEL
+    || draft.quality !== DEFAULT_IMAGE_QUALITY
     || draft.promptInputOptimizeStyle !== "standard"
     || draft.promptColorSchemeIds.length > 0
     || draft.promptColorSchemeInjection.trim()
@@ -536,9 +563,13 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
   const pendingSubmitScope = pendingChatSubmit?.scope ?? null;
   const [submittingScopes, setSubmittingScopes] = useState<string[]>([]);
   const [imageCount, setImageCount] = useState(1);
+  const [imageModel, setImageModel] = useState<ImageModelId>(DEFAULT_GENERATION_IMAGE_MODEL);
+  const [quality, setQuality] = useState<ImageQuality>(DEFAULT_IMAGE_QUALITY);
   const [background, setBackground] = useState<ImageBackgroundOption>("auto");
   const [assetTarget, setAssetTarget] = useState<AssetModalTarget | null>(null);
   const [casePickerOpen, setCasePickerOpen] = useState(false);
+  const [drawingEditor, setDrawingEditor] = useState<DrawingEditorState | null>(null);
+  const [drawingDocuments, setDrawingDocuments] = useState<Record<string, DrawingElement[]>>({});
   const [chatIntroOpen, setChatIntroOpen] = useState(false);
   const [aiClientInstallOpen, setAiClientInstallOpen] = useState(false);
   const [activeBranchId, setActiveBranchId] = useState<string | null>(null);
@@ -663,7 +694,12 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
   const providerOptions = providers.data?.providers ?? [];
   const assetCategoryList = assetCategories.data?.categories ?? [];
   const assetReviewEnabled = assetCategories.data?.reviewEnabled ?? true;
-  const { currentProvider, providerId, setSize, size, sizeOptions } = useImageProviderSelection(providerOptions);
+  const { providerId, setSize, size, sizeOptions } = useImageProviderSelection(providerOptions);
+  const qualityOptions = useMemo(() => buildQualityOptions(imageModelQualities(imageModel)), [imageModel]);
+  const selectImageModel = useCallback((nextModel: ImageModelId) => {
+    setImageModel(nextModel);
+    setQuality((current) => isImageQualitySupported(nextModel, current) ? current : DEFAULT_IMAGE_QUALITY);
+  }, []);
   const composerScopeKey = sessionId ? `session:${sessionId}` : COMPOSER_NEW_DRAFT_SCOPE_KEY;
   const composerInstanceKey = sessionId ? composerScopeKey : `${COMPOSER_NEW_DRAFT_SCOPE_KEY}:${newChatResetKey}`;
   const currentComposerDraft = composerDrafts[composerScopeKey] ?? null;
@@ -684,6 +720,8 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
   const currentPromptColorSchemeInjection = currentComposerDraft?.promptColorSchemeInjection ?? "";
   const restoringComposerDraftScopeRef = useRef<string | null>(null);
   const hasRestoredComposerScopeRef = useRef(false);
+  const composerDraftRestoreOriginRef = useRef<{ scopeKey: string; hadStoredDraft: boolean } | null>(null);
+  const conversationSelectionHydratedScopeRef = useRef<string | null>(null);
   const handlePromptTemplateDraftChange = useCallback((promptTemplate: ComposerSessionDraft["promptTemplate"]) => {
     upsertComposerDraft(composerScopeKey, { promptTemplate });
   }, [composerScopeKey, upsertComposerDraft]);
@@ -840,6 +878,14 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
       ? formatImageAnnotationPrompt(request.imageAnnotations ?? [], request.prompt)
       : request.prompt;
     const result = await api.createSession({ prompt: sessionPrompt, clientRequestId: request.clientRequestId });
+    const submittedImageModel = normalizeImageModel(
+      request.model,
+      request.mode === "edit" ? DEFAULT_EDIT_IMAGE_MODEL : DEFAULT_GENERATION_IMAGE_MODEL
+    );
+    upsertComposerDraft(`session:${result.session.id}`, {
+      imageModel: submittedImageModel,
+      quality: normalizeImageQuality(submittedImageModel, request.quality)
+    });
     submitSessionByRequestRef.current.set(request.clientRequestId, result.session.id);
     replaceSubmittingScope(request.pendingScope, result.session.id);
     if (pendingSubmitScopeRef.current === request.pendingScope) setPendingScope(result.session.id);
@@ -883,6 +929,8 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
           providerId: request.providerId,
           prompt: request.prompt,
           ...(request.language ? { language: request.language } : {}),
+          ...(request.model ? { model: request.model } : {}),
+          ...(request.quality ? { quality: request.quality } : {}),
           size: requestSizeFromSelection(request.size ?? ""),
           ...(request.n ? { n: request.n } : {}),
           ...(request.background ? { background: request.background } : {}),
@@ -892,6 +940,7 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
           sourceCaseItemIds: request.sourceCaseItemIds ?? [],
           sourceReferenceIds: request.sourceReferenceIds ?? [],
           ...(request.sourceInlineImages?.length ? { sourceInlineImages: request.sourceInlineImages } : {}),
+          ...(request.imageMarkupReference ? { imageMarkupReference: true } : {}),
           ...(request.referenceAssetId ? { referenceAssetId: request.referenceAssetId } : {}),
           ...(request.maskDataUrl ? { maskDataUrl: request.maskDataUrl } : {}),
           ...(request.editIntent ? { editIntent: request.editIntent } : {}),
@@ -909,6 +958,8 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
         providerId: request.providerId,
         prompt: request.prompt,
         ...(request.language ? { language: request.language } : {}),
+        ...(request.model ? { model: request.model } : {}),
+        ...(request.quality ? { quality: request.quality } : {}),
         size: requestSizeFromSelection(request.size ?? ""),
         ...(request.n ? { n: request.n } : {}),
         ...(request.background ? { background: request.background } : {}),
@@ -1016,6 +1067,8 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
     imageCount,
     size,
     background,
+    imageModel,
+    quality,
     promptInputOptimizeStyle: currentPromptInputOptimizeStyle,
     promptColorSchemeIds: [...currentPromptColorSchemeIds],
     promptColorSchemeInjection: currentPromptColorSchemeInjection,
@@ -1032,6 +1085,8 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
     setImageCount(snapshot.imageCount);
     setSize(snapshot.size);
     setBackground(snapshot.background);
+    setImageModel(snapshot.imageModel);
+    setQuality(snapshot.quality);
     setActiveBranchId(snapshot.activeBranchId === MAIN_CHAT_BRANCH_ID ? null : snapshot.activeBranchId);
     upsertComposerDraft(targetScopeKey, {
       draftPrompt: restoringEditor ? "" : snapshot.prompt,
@@ -1041,6 +1096,8 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
       imageCount: snapshot.imageCount,
       size: snapshot.size,
       background: snapshot.background,
+      imageModel: snapshot.imageModel,
+      quality: snapshot.quality,
       promptInputOptimizeStyle: snapshot.promptInputOptimizeStyle,
       promptColorSchemeIds: snapshot.promptColorSchemeIds,
       promptColorSchemeId: snapshot.promptColorSchemeIds[0] ?? "",
@@ -1063,6 +1120,8 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
       imageCount,
       size,
       background,
+      imageModel,
+      quality,
       promptInputOptimizeStyle: currentPromptInputOptimizeStyle,
       promptColorSchemeIds: currentPromptColorSchemeIds,
       promptColorSchemeId: currentPromptColorSchemeIds[0] ?? "",
@@ -1228,6 +1287,8 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
             imageCount: pendingEditorReturn?.imageCount ?? imageCount,
             size: pendingEditorReturn?.size ?? size,
             background: pendingEditorReturn?.background ?? background,
+            imageModel: pendingEditorReturn?.imageModel ?? imageModel,
+            quality: pendingEditorReturn?.quality ?? quality,
             promptInputOptimizeStyle: pendingEditorReturn?.promptInputOptimizeStyle ?? currentPromptInputOptimizeStyle,
             promptColorSchemeIds: pendingEditorReturn?.promptColorSchemeIds ?? currentPromptColorSchemeIds,
             promptColorSchemeInjection: pendingEditorReturn?.promptColorSchemeInjection ?? currentPromptColorSchemeInjection,
@@ -1248,6 +1309,8 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
     const backgroundChanged = snapshot.editorReturn
       ? background !== snapshot.background
       : background !== "auto";
+    const modelChanged = imageModel !== snapshot.imageModel;
+    const qualityChanged = quality !== snapshot.quality;
     return Boolean(
       draftPrompt.trim()
       || editImage
@@ -1255,6 +1318,8 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
       || selectedAssets.length > 0
       || size
       || backgroundChanged
+      || modelChanged
+      || qualityChanged
       || imageCount !== snapshot.imageCount
       || currentPromptInputOptimizeStyle !== "standard"
       || currentPromptColorSchemeIds.length > 0
@@ -1356,7 +1421,7 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
       }
     });
   };
-  const { handleComposerPaste } = useComposerPasteAsset({ autoUploadPastedAssets, selectedAssets, setSelectedAssets, showToast });
+  const { addComposerImage, handleComposerPaste } = useComposerPasteAsset({ autoUploadPastedAssets, selectedAssets, setSelectedAssets, showToast });
   const pickCasePrompt = (item: Pick<CaseCategory["items"][number], "id" | "groupId" | "prompt">) => {
     const caseItemId = item.groupId || item.id;
     setDraftPrompt(item.prompt, caseItemId && !isDefaultCaseItemId(caseItemId) ? { caseItemId, prompt: item.prompt } : null);
@@ -1401,7 +1466,10 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
     const sourceImage = editImage;
     const selectedCaseReferences = selectedCaseMaterials.map(sourceReferenceFromCaseMaterial);
     const hasSelectedCaseMaterials = selectedCaseReferences.length > 0;
-    const requestSourceImage = sourceImage ?? (hasSelectedCaseMaterials ? null : continuityImage);
+    const hasDrawingReference = selectedAssets.some((asset) => (
+      Boolean(drawingDocuments[asset.id]) || isDrawingReferenceName(asset.name)
+    ));
+    const requestSourceImage = sourceImage ?? (hasSelectedCaseMaterials || hasDrawingReference ? null : continuityImage);
     const useHiddenContinuityImage = !sourceImage && selectedAssets.length === 0 && !hasSelectedCaseMaterials && Boolean(continuityImage);
     const mode: SubmitRequest["mode"] = requestSourceImage || selectedAssets.length > 0 || hasSelectedCaseMaterials ? "edit" : "generation";
     const sourceAsset = selectedAssets[0];
@@ -1496,12 +1564,15 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
           sourceAssetIds,
           sourceCaseItemIds: selectedCaseItemIds,
           sourceReferenceIds: [],
+          ...(hasDrawingReference ? { drawingReference: true } : {}),
           ...(selectedCaseReferences.length > 0 ? { sourceCaseReferences: selectedCaseReferences } : {}),
           ...(requestCaseItemId ? { caseItemId: requestCaseItemId } : {}),
           ...(referenceAsset ? { referenceAssetId: referenceAsset.id } : {}),
           ...(useHiddenContinuityImage ? { hideReference: true, autoReference: true } : {}),
           ...branchFields,
           size: selectedRequestSize,
+          model: imageModel,
+          quality,
           ...backgroundRequestOptions,
           n: resolvedImageCount
         },
@@ -1527,6 +1598,8 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
       providerId,
       prompt,
       language: resolvedLanguage,
+      model: imageModel,
+      quality,
       size: selectedRequestSize,
       ...backgroundRequestOptions,
       n: resolvedImageCount,
@@ -1535,6 +1608,7 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
       sourceAssetIds,
       sourceCaseItemIds: selectedCaseItemIds,
       sourceReferenceIds: [],
+      ...(hasDrawingReference ? { drawingReference: true } : {}),
       ...(sourceInlineImages.length > 0 ? { sourceInlineImages } : {}),
       ...(referenceAsset ? { referenceAssetId: referenceAsset.id } : {}),
       ...(useHiddenContinuityImage ? { hideReference: true } : {}),
@@ -1745,6 +1819,8 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
   }, [closePagedImageEditor, editorImageRequest?.persistAcrossSessionChange, imageEditor, sessionId]);
   useEffect(() => {
     const storedDraft = useWorkbench.getState().composerDrafts[composerScopeKey];
+    composerDraftRestoreOriginRef.current = { scopeKey: composerScopeKey, hadStoredDraft: Boolean(storedDraft) };
+    conversationSelectionHydratedScopeRef.current = null;
     const draftSelectedAssets = persistableAssets(selectedAssets);
     const handoffDraftFields = {
       draftPrompt,
@@ -1754,6 +1830,8 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
       imageCount,
       size,
       background,
+      imageModel,
+      quality,
       promptInputOptimizeStyle: currentPromptInputOptimizeStyle,
       promptColorSchemeIds: currentPromptColorSchemeIds,
       promptColorSchemeId: currentPromptColorSchemeIds[0] ?? "",
@@ -1777,6 +1855,11 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
     setImageCount(nextDraft.imageCount);
     setSize(nextDraft.size);
     setBackground(nextDraft.background);
+    setImageModel(normalizeImageModel(nextDraft.imageModel, DEFAULT_GENERATION_IMAGE_MODEL));
+    setQuality(normalizeImageQuality(
+      normalizeImageModel(nextDraft.imageModel, DEFAULT_GENERATION_IMAGE_MODEL),
+      nextDraft.quality
+    ));
     setMaterialPickerOpen(false);
     setCasePickerOpen(false);
     setError("");
@@ -1794,6 +1877,20 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
   }, [composerInstanceKey]);
 
   useEffect(() => {
+    if (!sessionId || messages.isLoading || !messages.data) return;
+    if (conversationSelectionHydratedScopeRef.current === composerScopeKey) return;
+    const restoreOrigin = composerDraftRestoreOriginRef.current;
+    if (!restoreOrigin || restoreOrigin.scopeKey !== composerScopeKey) return;
+    conversationSelectionHydratedScopeRef.current = composerScopeKey;
+    if (restoreOrigin.hadStoredDraft) return;
+    const selection = latestConversationImageSelection(messages.data.messages);
+    if (!selection) return;
+    setImageModel(selection.imageModel);
+    setQuality(selection.quality);
+    upsertComposerDraft(composerScopeKey, selection);
+  }, [composerScopeKey, messages.data, messages.isLoading, sessionId, upsertComposerDraft]);
+
+  useEffect(() => {
     if (imageEditor || editorImageRequest?.discardDraftOnClose) return;
     if (restoringComposerDraftScopeRef.current === composerScopeKey) return;
     upsertComposerDraft(composerScopeKey, {
@@ -1804,6 +1901,8 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
       imageCount,
       size,
       background,
+      imageModel,
+      quality,
       promptInputOptimizeStyle: currentPromptInputOptimizeStyle,
       promptColorSchemeIds: currentPromptColorSchemeIds,
       promptColorSchemeId: currentPromptColorSchemeIds[0] ?? "",
@@ -1820,6 +1919,8 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
     background,
     imageEditor,
     imageCount,
+    imageModel,
+    quality,
     selectedAssets,
     selectedCaseMaterials,
     size,
@@ -1841,7 +1942,12 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
     sourceCaseItemIds: string[] = [],
     editIntent: ImageEditIntent = "standard",
     imageAnnotations: ImageAnnotation[] = [],
-    requestedImageCount: number = 1
+    requestedImageCount: number = 1,
+    requestedImageModel: ImageModelId = DEFAULT_EDIT_IMAGE_MODEL,
+    requestedQuality: ImageQuality = DEFAULT_IMAGE_QUALITY,
+    requestedBackground: ImageBackgroundOption = "auto",
+    sourceInlineImages: Array<{ id?: string; name?: string; dataUrl: string }> = [],
+    imageMarkupReference = false
   ) => {
     const trimmedPrompt = prompt.trim();
     const displayedPrompt = editIntent === "annotation"
@@ -1851,7 +1957,7 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
         : trimmedPrompt;
     if (currentScopeBusy || !displayedPrompt) return;
     const selectedEditImageCount = resolveSelectedImageCount(requestedImageCount);
-    const sourceInputCount = 1 + sourceAssetIds.length + sourceCaseItemIds.length;
+    const sourceInputCount = 1 + sourceAssetIds.length + sourceCaseItemIds.length + sourceInlineImages.length;
     const resolvedImageCount = resolveImageEditCount(
       editIntent === "annotation" ? trimmedPrompt : displayedPrompt,
       selectedEditImageCount,
@@ -1860,16 +1966,30 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
     );
     const effectiveSize = requestSize ?? size;
     const selectedRequestSize = requestSizeFromSelection(effectiveSize);
-    // The full-screen editor has no background control. Let the server derive
-    // the edit background from the source image instead of reusing a hidden
-    // value from the chat composer.
-    const backgroundRequestOptions = imageBackgroundRequestOptions("auto");
+    // Ordinary editor requests derive the background from the source image.
+    // Explicit editor actions, such as one-click background removal, can
+    // override that behavior without reusing the hidden chat-composer value.
+    const backgroundRequestOptions = imageBackgroundRequestOptions(requestedBackground);
     const sourceAssetIdSet = new Set(sourceAssetIds);
     const sourceCaseItemIdSet = new Set(sourceCaseItemIds);
     const selectedCaseReferences = selectedCaseMaterials.filter((item) => sourceCaseItemIdSet.has(item.caseItemId)).map(sourceReferenceFromCaseMaterial);
     const sourceReferenceImages = [
       ...selectedCaseReferences,
-      ...selectedAssets.filter((asset) => sourceAssetIdSet.has(asset.id)).map(sourceReferenceFromAsset)
+      ...selectedAssets.filter((asset) => sourceAssetIdSet.has(asset.id)).map(sourceReferenceFromAsset),
+      ...sourceInlineImages.map((image, index) => ({
+        id: `inline:${image.id ?? index}`,
+        sourceAssetId: null,
+        sourceType: "pasted" as const,
+        sourceId: null,
+        kind: "asset" as const,
+        name: image.name || "图片标注",
+        url: image.dataUrl,
+        originalUrl: image.dataUrl,
+        previewUrl: image.dataUrl,
+        thumbnailUrl: image.dataUrl,
+        imageWidth: 0,
+        imageHeight: 0
+      }))
     ];
     const clientRequestId = createSubmitRequestId();
     const pendingScope = currentSubmitScope;
@@ -1882,6 +2002,8 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
       libraryContinuations: imageEditor.libraryContinuations,
       initialPrompt: trimmedPrompt,
       initialImageCount: selectedEditImageCount,
+      initialImageModel: requestedImageModel,
+      initialQuality: requestedQuality,
       preserveSelectedAssets: true,
       persistAcrossSessionChange: true,
       discardDraftOnClose: true
@@ -1891,6 +2013,8 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
       editImage: image,
       editorReturn,
       size: effectiveSize,
+      imageModel: requestedImageModel,
+      quality: requestedQuality,
       activeBranchId: activeChatBranchId
     });
     setPendingEditorCancellationReturn(editorReturn ? {
@@ -1901,6 +2025,8 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
       imageCount: submittedSnapshot.imageCount,
       size: submittedSnapshot.size,
       background: submittedSnapshot.background,
+      imageModel: submittedSnapshot.imageModel,
+      quality: submittedSnapshot.quality,
       promptInputOptimizeStyle: submittedSnapshot.promptInputOptimizeStyle,
       promptColorSchemeIds: submittedSnapshot.promptColorSchemeIds,
       promptColorSchemeInjection: submittedSnapshot.promptColorSchemeInjection,
@@ -1926,8 +2052,11 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
           ...(selectedCaseReferences.length > 0 ? { sourceCaseReferences: selectedCaseReferences } : {}),
           hasMask: Boolean(maskDataUrl),
           editIntent,
+          ...(imageMarkupReference ? { imageMarkupReference: true } : {}),
           ...(imageAnnotations.length > 0 ? { imageAnnotations } : {}),
           size: selectedRequestSize,
+          model: requestedImageModel,
+          quality: requestedQuality,
           ...backgroundRequestOptions,
           ...branchFields,
           n: resolvedImageCount
@@ -1962,6 +2091,12 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
     setSelectedCaseMaterials([]);
     setMaterialPickerOpen(false);
     setSize("");
+    setImageModel(requestedImageModel);
+    setQuality(requestedQuality);
+    upsertComposerDraft(composerScopeKey, {
+      imageModel: requestedImageModel,
+      quality: requestedQuality
+    });
     resetPromptInputOptimizeStyle();
     resetPromptColorScheme();
     startTrackedSubmit({
@@ -1972,20 +2107,42 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
       providerId,
       prompt: editIntent === "remove" ? REMOVE_SELECTED_AREA_PROMPT : trimmedPrompt,
       language: resolvedLanguage,
+      model: requestedImageModel,
+      quality: requestedQuality,
       size: selectedRequestSize,
       ...backgroundRequestOptions,
       n: resolvedImageCount,
       sourceImageIds: [image.id],
       sourceAssetIds,
       sourceCaseItemIds,
+      ...(sourceInlineImages.length > 0 ? { sourceInlineImages } : {}),
+      ...(imageMarkupReference ? { imageMarkupReference: true } : {}),
       ...(maskDataUrl ? { maskDataUrl } : {}),
       editIntent,
       ...(imageAnnotations.length > 0 ? { imageAnnotations } : {}),
       ...branchFields
     }, submittedSnapshot);
   };
-  const sendAspectRatioEdit = (image: WorkImage, option: SizeOption, requestedImageCount: number) => {
-    sendEditRequest(image, `将宽高比设为 ${option.ratio}`, undefined, option.value, [], [], "standard", [], requestedImageCount);
+  const sendAspectRatioEdit = (
+    image: WorkImage,
+    option: SizeOption,
+    requestedImageCount: number,
+    requestedImageModel: ImageModelId,
+    requestedQuality: ImageQuality
+  ) => {
+    sendEditRequest(
+      image,
+      `将宽高比设为 ${option.ratio}`,
+      undefined,
+      option.value,
+      [],
+      [],
+      "standard",
+      [],
+      requestedImageCount,
+      requestedImageModel,
+      requestedQuality
+    );
   };
   const submitMessageEdit = (payload: {
     rootId: string;
@@ -2005,6 +2162,14 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
       sourceSnapshot.sourceReferenceIds.length > 0
         ? "edit"
         : "generation";
+    const editedImageModel = normalizeImageModel(
+      payload.userMessage.metadata?.model,
+      mode === "edit" ? DEFAULT_EDIT_IMAGE_MODEL : DEFAULT_GENERATION_IMAGE_MODEL
+    );
+    const editedImageQuality = normalizeImageQuality(
+      editedImageModel,
+      payload.userMessage.metadata?.quality ?? DEFAULT_IMAGE_QUALITY
+    );
     const originalEditIntent = payload.userMessage.metadata?.editIntent;
     const parsedAnnotations = originalEditIntent === "annotation"
       ? parseImageAnnotations(payload.userMessage.metadata?.imageAnnotations)
@@ -2140,9 +2305,12 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
           sourceAssetIds: sourceSnapshot.sourceAssetIds,
           sourceCaseItemIds: sourceSnapshot.sourceCaseItemIds,
           sourceReferenceIds: sourceSnapshot.sourceReferenceIds,
+          ...(sourceSnapshot.drawingReference ? { drawingReference: true } : {}),
           ...(sourceSnapshot.caseReferences.length > 0 ? { sourceCaseReferences: sourceSnapshot.caseReferences } : {}),
           ...(sourceSnapshot.referenceAssetId ? { referenceAssetId: sourceSnapshot.referenceAssetId } : {}),
           size: selectedRequestSize,
+          model: editedImageModel,
+          quality: editedImageQuality,
           ...backgroundRequestOptions,
           n: resolvedImageCount
         },
@@ -2153,6 +2321,12 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
     setSize("");
     setBackground("auto");
     setImageCount(1);
+    setImageModel(editedImageModel);
+    setQuality(editedImageQuality);
+    upsertComposerDraft(composerScopeKey, {
+      imageModel: editedImageModel,
+      quality: editedImageQuality
+    });
     startTrackedSubmit({
       clientRequestId,
       pendingScope,
@@ -2161,6 +2335,8 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
       providerId,
       prompt: requestPrompt,
       language: resolvedLanguage,
+      model: editedImageModel,
+      quality: editedImageQuality,
       size: selectedRequestSize,
       ...backgroundRequestOptions,
       n: resolvedImageCount,
@@ -2168,6 +2344,7 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
       sourceAssetIds: sourceSnapshot.sourceAssetIds,
       sourceCaseItemIds: sourceSnapshot.sourceCaseItemIds,
       sourceReferenceIds: sourceSnapshot.sourceReferenceIds,
+      ...(sourceSnapshot.drawingReference ? { drawingReference: true } : {}),
       ...(hideReference ? { hideReference: true } : {}),
       ...(sourceSnapshot.referenceAssetId ? { referenceAssetId: sourceSnapshot.referenceAssetId } : {}),
       editIntent,
@@ -2198,21 +2375,34 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
       title: caseMaterial.title,
       onRemove: () => setSelectedCaseMaterials(selectedCaseMaterials.filter((item) => item.caseItemId !== caseMaterial.caseItemId))
     })),
-    ...selectedAssets.map((asset) => ({
-      id: asset.id,
-      url: asset.thumbnailUrl ?? asset.previewUrl ?? asset.url,
-      previewUrl: asset.previewUrl ?? asset.originalUrl ?? asset.url,
-      name: asset.name,
-      title: asset.name,
-      onRemove: () => setSelectedAssets(selectedAssets.filter((item) => item.id !== asset.id))
-    }))
+    ...selectedAssets.map((asset) => {
+      const drawingElements = drawingDocuments[asset.id];
+      return {
+        id: asset.id,
+        url: asset.thumbnailUrl ?? asset.previewUrl ?? asset.url,
+        previewUrl: asset.previewUrl ?? asset.originalUrl ?? asset.url,
+        name: asset.name,
+        title: asset.name,
+        openLabel: drawingElements ? t("drawing.continue") : undefined,
+        onOpen: drawingElements
+          ? () => {
+              setMaterialPickerOpen(false);
+              setCasePickerOpen(false);
+              setDrawingEditor({ assetId: asset.id, elements: drawingElements });
+            }
+          : undefined,
+        onRemove: () => {
+          setSelectedAssets(selectedAssets.filter((item) => item.id !== asset.id));
+          setDrawingDocuments((current) => {
+            if (!current[asset.id]) return current;
+            const next = { ...current };
+            delete next[asset.id];
+            return next;
+          });
+        }
+      };
+    })
   ];
-
-  useComposerTextareaAutosize({
-    draftPrompt,
-    previewCount: composerPreviews.length,
-    textareaRef
-  });
 
   const showStarter = !sessionId && messageList.length === 0;
   const composerPlaceholder = sessionId || messageList.length > 0 || composerPreviews.length > 0
@@ -2395,6 +2585,8 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
           activeImageId={imageEditor.activeImageId}
           initialPrompt={imageEditor.initialPrompt}
           initialImageCount={imageEditor.initialImageCount}
+          initialImageModel={imageEditor.initialImageModel}
+          initialQuality={imageEditor.initialQuality}
           sizeOptions={sizeOptions}
           selectedSize=""
           isSubmitting={currentViewSubmitting}
@@ -2415,7 +2607,7 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
           onLockedRequest={() => showToast(t("imageEditor.requestLocked"), "info")}
           onPickSize={sendAspectRatioEdit}
           onToggleMaterialPicker={() => setMaterialPickerOpen(!materialPickerOpen)}
-          onSubmitEdit={({ image, prompt, imageCount: editorImageCount, editIntent, imageAnnotations, maskDataUrl, sourceAssetIds, sourceCaseItemIds }) =>
+          onSubmitEdit={({ image, prompt, imageCount: editorImageCount, imageModel: editorImageModel, quality: editorQuality, background: editorBackground, editIntent, imageAnnotations, maskDataUrl, sourceAssetIds, sourceCaseItemIds, sourceInlineImages, imageMarkupReference }) =>
             sendEditRequest(
               image,
               prompt,
@@ -2425,7 +2617,12 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
               sourceCaseItemIds ?? selectedCaseMaterials.map((item) => item.caseItemId),
               editIntent ?? "standard",
               imageAnnotations ?? [],
-              editorImageCount
+              editorImageCount,
+              editorImageModel,
+              editorQuality,
+              editorBackground ?? "auto",
+              sourceInlineImages ?? [],
+              imageMarkupReference ?? false
             )
           }
         />
@@ -2472,6 +2669,25 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
         onClose={() => setCasePickerOpen(false)}
         onConfirm={pickCaseMaterials}
       />
+      <DrawingCanvasDialog
+        open={Boolean(drawingEditor)}
+        initialElements={drawingEditor?.elements}
+        onClose={() => setDrawingEditor(null)}
+        onConfirm={async ({ file, elements }) => {
+          const replacedAssetId = drawingEditor?.assetId ?? "";
+          const result = await addComposerImage(
+            file,
+            "drawing",
+            replacedAssetId ? { replaceAssetId: replacedAssetId } : undefined
+          );
+          setDrawingDocuments((current) => {
+            const next = { ...current };
+            if (replacedAssetId) delete next[replacedAssetId];
+            next[result.asset.id] = elements;
+            return next;
+          });
+        }}
+      />
       <ChatComposer
         key={composerInstanceKey}
         autoOptimizePromptRequest={sessionId ? null : starterPromptOptimizeRequest}
@@ -2487,6 +2703,9 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
         placeholder={composerPlaceholder}
         previews={composerPreviews}
         imageCount={imageCount}
+        imageModel={imageModel}
+        quality={quality}
+        qualityOptions={qualityOptions}
         background={background}
         promptColorSchemes={promptColorSchemeList}
         promptColorSchemeIds={currentPromptColorSchemeIds}
@@ -2506,12 +2725,19 @@ export function ChatPage({ user, sessionActions }: { user: User; sessionActions?
         onCancel={currentCancelTarget ? cancelCurrentSubmit : undefined}
         onDraftPromptChange={setDraftPrompt}
         onImageCountChange={setImageCount}
+        onImageModelChange={selectImageModel}
+        onQualityChange={(nextQuality) => setQuality(normalizeImageQuality(imageModel, nextQuality))}
         onPaste={handleComposerPaste}
         onSelectedAssetsChange={setSelectedAssets}
         onSelectedCaseMaterialsChange={setSelectedCaseMaterials}
         onSizeChange={setSize}
         onSubmit={submitDraft}
         onToggleAsset={toggleAsset}
+        onOpenDrawing={() => {
+          setMaterialPickerOpen(false);
+          setCasePickerOpen(false);
+          setDrawingEditor({ assetId: null, elements: [] });
+        }}
         onOpenCasePicker={() => {
           setMaterialPickerOpen(false);
           setCasePickerOpen(true);

@@ -398,7 +398,7 @@ AI 客户端改图时使用的一次性本地图片上传记录。上传链接�
 | `suggested_case_category_ids_json` | 图片生成成功后自动判断的灵感风格 ID JSON 数组，用于加入灵感空间时预填 |
 | `suggested_asset_category_ids_json` | 图片生成成功后或打开加入素材库弹窗时自动判断的素材标签 ID JSON 数组，用于加入素材库时预填；为空时下次打开会重新生成 |
 | `kind` | 图片类型：`generation` 生成、`edit` 编辑 |
-| `size` / `quality` | 请求尺寸和质量；`size` 默认 `auto`，按 GPT Image 2 文档使用 `WIDTHxHEIGHT`，常用 `1024x1024`、`1536x2048`、`1152x2048`、`2048x1536`、`2048x1152`；`quality` 默认可选 `low`、`medium`、`high`，具体也可由渠道配置扩展 |
+| `size` / `quality` | 请求尺寸和质量；`size` 默认 `auto`，按 GPT Image 2 文档使用 `WIDTHxHEIGHT`，常用 `1024x1024`、`1536x2048`、`1152x2048`、`2048x1536`、`2048x1152`；`quality` 默认 `auto`，也可显式选择 `low`、`medium`、`high`，GPT Image 2.5 还支持 `xhigh`、`max` |
 | `provider_id` | 实际渠道 ID |
 | `mime_type` | 图片 MIME 类型 |
 | `parent_image_id` | 编辑来源图片 |
@@ -844,6 +844,7 @@ Remote MCP OAuth 令牌有效期配置，固定使用 `default` 单行。保存�
 | `github_entry` | 开启 | 用户设置“关于”中的 GitHub 仓库入口；关闭后隐藏入口并改用更新日志图标 |
 | `ai_client_install_entry` | 开启 | 新对话空白页中的 AI 客户端安装推荐入口；关闭不影响 `/mcp`、`/plugin` 直达安装页 |
 | `debug_image_edit_mask` | 关闭 | 图片编辑 mask 调试；迁移 `debug_settings.image_edit_mask` |
+| `debug_runtime_logging` | 关闭 | 运行故障日志；保存后立即控制 `data/logs/` 是否继续写入，不删除已有日志 |
 
 ### smtp_settings
 
@@ -898,7 +899,7 @@ Remote MCP OAuth 令牌有效期配置，固定使用 `default` 单行。保存�
 | `api_key_env` / `api_key_value` | API Key 来源 |
 | `route_mode` | 路由模式：`images_api`、`responses`、`auto`；首次初始化和新建 CPA 渠道时默认为 `auto` |
 | `generation_path` / `edit_path` / `responses_path` | 上游接口路径 |
-| `model` / `responses_model` | 图片模型和 Responses 主模型 |
+| `model` / `responses_model` | 图片模型和 Responses 主模型；新渠道默认分别为 `gpt-image-2.5-sunburst`、`gpt-6-astra`，后台可从渠道模型目录刷新后分别选择 |
 | `sizes` / `qualities` | 可选尺寸和质量 JSON |
 | `default_size` / `default_quality` | 默认尺寸和质量 |
 | `response_image_path` | 显式图片字段路径 |
@@ -1022,6 +1023,8 @@ Remote MCP OAuth 令牌有效期配置，固定使用 `default` 单行。保存�
 | `image_edit_response` | 旧响应调试开关，`0` 否、`1` 是；响应摘要现在默认写入 `image_jobs.response_json` |
 | `updated_at` | 更新时间 |
 
+运行故障日志开关不在 `debug_settings` 增加重复字段，唯一运行时来源为 `global_switch_settings.debug_runtime_logging`。日志正文不写入 SQLite，而是以 JSONL 文件保存到 `data/logs/`；按天及 20 MiB 单文件轮转，保留 14 天且总量不超过 200 MiB。该目录属于临时诊断数据，不进入应用数据备份。
+
 ### proxy_settings
 
 代理配置。
@@ -1138,7 +1141,7 @@ CPA 同步执行记录。
 | 字段 | 说明 |
 | --- | --- |
 | `id` | 日志 ID |
-| `action` | 操作类型；当前代码写入 `config.setup`、`config.login`、`config.user_access`、`team.create`、`team.update`、`team.delete`、`user.create`、`user.update`、`user.reset_password`、`user.delete`、`user.self_register`、`user.password_reset`、`registration_settings.save`、`global_switch.save`、`site_settings.save`、`external_mcp_settings.save`、`smtp_settings.save`、`smtp_settings.test`、`sms_settings.save`、`sms_settings.test`、`image_account.refresh_usage`、`image_account.create`、`image_account.update`、`image_account.delete`、`image_mode.save`、`provider.save`、`prompt_optimizer.save`、`prompt_optimizer.models`、`prompt_optimizer.test`、`proxy.save`、`debug.save`、`cpa.save`、`cpa.sync`、`backup.settings.save`、`backup.run`、`backup.delete`、`safety_review.save`、`asset.share.approve`、`asset.share.reject`、`case.review.approve`、`case.review.reject`、`changelog.create`、`changelog.update`、`changelog.delete` |
+| `action` | 操作类型；当前代码写入 `config.setup`、`config.login`、`config.user_access`、`team.create`、`team.update`、`team.delete`、`user.create`、`user.update`、`user.reset_password`、`user.delete`、`user.self_register`、`user.password_reset`、`registration_settings.save`、`global_switch.save`、`site_settings.save`、`external_mcp_settings.save`、`smtp_settings.save`、`smtp_settings.test`、`sms_settings.save`、`sms_settings.test`、`image_account.refresh_usage`、`image_account.create`、`image_account.update`、`image_account.delete`、`image_mode.save`、`provider.save`、`prompt_optimizer.save`、`prompt_optimizer.models`、`prompt_optimizer.test`、`proxy.save`、`debug.save`、`runtime_logs.open_directory`、`cpa.save`、`cpa.sync`、`backup.settings.save`、`backup.run`、`backup.delete`、`safety_review.save`、`asset.share.approve`、`asset.share.reject`、`case.review.approve`、`case.review.reject`、`changelog.create`、`changelog.update`、`changelog.delete` |
 | `detail` | JSON 详情 |
 | `created_at` | 创建时间 |
 

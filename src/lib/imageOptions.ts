@@ -37,7 +37,9 @@ const BASE_SIZE_OPTIONS: SizeOption[] = [
 const QUALITY_PRESETS: Record<string, { label: string; labelKey: string; descriptionKey: string }> = {
   low: { label: "低", labelKey: "picker.quality.low", descriptionKey: "picker.quality.lowDesc" },
   medium: { label: "中", labelKey: "picker.quality.medium", descriptionKey: "picker.quality.mediumDesc" },
-  high: { label: "高", labelKey: "picker.quality.high", descriptionKey: "picker.quality.highDesc" }
+  high: { label: "高", labelKey: "picker.quality.high", descriptionKey: "picker.quality.highDesc" },
+  xhigh: { label: "超高", labelKey: "picker.quality.xhigh", descriptionKey: "picker.quality.xhighDesc" },
+  max: { label: "极致", labelKey: "picker.quality.max", descriptionKey: "picker.quality.maxDesc" }
 };
 
 export const IMAGE_BACKGROUND_PICKER_OPTIONS: BackgroundOption[] = [

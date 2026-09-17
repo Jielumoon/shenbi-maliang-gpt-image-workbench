@@ -852,51 +852,24 @@
 }
 
 .rendering-card {
+  --rendering-dot-rgb: 75, 139, 246;
   position: relative;
   isolation: isolate;
   contain: paint;
   width: min(480px, 100%);
   aspect-ratio: 1;
   overflow: hidden;
-  border-radius: 34px;
-  background: #f5f5f4;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.68);
+  border-radius: 36px;
+  background: transparent;
+  box-shadow: none;
 }
 
 .rendering-card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.28), transparent 40%),
-    radial-gradient(circle at 86% 86%, rgba(224, 224, 222, 0.3), transparent 42%);
-  opacity: 1;
-  pointer-events: none;
+  content: none;
 }
 
 .rendering-card::after {
-  content: "";
-  position: absolute;
-  inset: -6% -72%;
-  z-index: 8;
-  background: linear-gradient(
-    108deg,
-    transparent 28%,
-    rgba(196, 196, 190, 0.08) 39%,
-    rgba(255, 255, 255, 0.9) 48%,
-    rgba(255, 255, 255, 0.66) 52%,
-    rgba(196, 196, 190, 0.07) 62%,
-    transparent 74%
-  );
-  opacity: 0.58;
-  transform: translateX(-120%);
-  animation: renderSweep 4.7s infinite cubic-bezier(0.38, 0, 0.18, 1);
-  will-change: transform;
-  pointer-events: none;
-}
-
-[data-rendering-motion-paused="true"] .rendering-card::after {
-  animation-play-state: paused;
+  content: none;
 }
 
 .rendering-error-message {
@@ -984,6 +957,43 @@
   transform: translateY(0);
 }
 
+.rendering-title.game-help {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  color: #64748b;
+}
+
+.rendering-title.game-help > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rendering-game-back {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+
+.rendering-game-back:hover {
+  background: var(--button-default-hover-bg);
+  color: var(--app-text);
+}
+
+.rendering-game-back:focus-visible {
+  outline: 2px solid var(--control-focus-border);
+  outline-offset: 1px;
+}
+
 .rendering-dot-field {
   position: absolute;
   inset: 0;
@@ -993,24 +1003,11 @@
 }
 
 .rendering-dot-field::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-  background: radial-gradient(circle at 50% 50%, transparent 0 84%, rgba(245, 245, 244, 0.05) 94%, rgba(245, 245, 244, 0.14) 100%);
-  opacity: 0.34;
-  pointer-events: none;
+  content: none;
 }
 
 .rendering-dot-field::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-  background:
-    linear-gradient(90deg, rgba(245, 245, 244, 0.74) 0, rgba(245, 245, 244, 0.28) 8%, transparent 15%, transparent 85%, rgba(245, 245, 244, 0.28) 92%, rgba(245, 245, 244, 0.74) 100%),
-    linear-gradient(180deg, rgba(245, 245, 244, 0.74) 0, rgba(245, 245, 244, 0.28) 8%, transparent 15%, transparent 85%, rgba(245, 245, 244, 0.28) 92%, rgba(245, 245, 244, 0.74) 100%);
-  pointer-events: none;
+  content: none;
 }
 
 .rendering-dot-canvas {
@@ -1022,6 +1019,69 @@
   z-index: 2;
   contain: strict;
   pointer-events: none;
+}
+
+.rendering-game-start {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.rendering-game-start:focus-visible {
+  outline: 2px solid rgb(var(--rendering-dot-rgb));
+  outline-offset: -3px;
+}
+
+.rendering-snake-game {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow: hidden;
+  border-radius: inherit;
+  outline: none;
+  touch-action: none;
+  user-select: none;
+}
+
+.rendering-snake-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.rendering-snake-status {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  min-width: 132px;
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  padding: 10px 16px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.84);
+  color: #334155;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.14);
+  transform: translate(-50%, -50%);
+  backdrop-filter: blur(12px);
+  pointer-events: none;
+}
+
+.rendering-snake-status strong {
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.rendering-snake-status small {
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.2;
 }
 
 @keyframes renderingTitleIn {
@@ -1039,25 +1099,9 @@
   }
 }
 
-@keyframes renderSweep {
-  0% {
-    transform: translateX(-120%);
-  }
-  44%,
-  100% {
-    transform: translateX(120%);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .rendering-card::after,
   .rendering-title {
     animation: none;
-  }
-
-  .rendering-card::after {
-    opacity: 0.18;
-    transform: translateX(0);
   }
 
   .rendering-title {

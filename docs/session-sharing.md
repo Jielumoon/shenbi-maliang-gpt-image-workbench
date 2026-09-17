@@ -65,7 +65,7 @@
 | `GET /shared-sessions/:token/result-images/:imageId/download-options` | 按共享局部图片 ID 获取下载选项的兼容接口 |
 | `GET /shared-sessions/:token/result-images/:imageId/download?variant=...` | 按共享局部图片 ID 下载的兼容接口 |
 
-公共 DTO 使用 `shared-message-N`、`shared-image-N` 等分享内局部 ID，并只保留渲染需要的角色、文本、时间、尺寸、媒体 URL和安全元数据。`metadata` 不是数据库原值，只允许 `mode`、分享内局部 `jobId` 和用于隐藏引用授权的布尔标记；branch/revision/message 关系会被移除。响应不包含用户身份、provider、任务详情、遮罩、磁盘路径或原始素材内部 ID。
+公共 DTO 使用 `shared-message-N`、`shared-image-N` 等分享内局部 ID，并只保留渲染需要的角色、文本、时间、尺寸、媒体 URL和安全元数据。`metadata` 不是数据库原值，只允许 `mode`、分享内局部 `jobId`、用于隐藏引用授权的布尔标记，以及结果卡片展示所需的图片模型、语言模型和质量字段；branch/revision/message 关系会被移除。响应不包含用户身份、provider、实际路由、任务详情、降级原因、遮罩、磁盘路径或原始素材内部 ID。
 
 ## 快照创建与生命周期
 

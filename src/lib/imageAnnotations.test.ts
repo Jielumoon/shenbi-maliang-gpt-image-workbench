@@ -4,6 +4,7 @@ import {
   formatImageAnnotationMessageDisplayText,
   formatImageAnnotationPrompt,
   imageAnnotationEditorPosition,
+  imageAnnotationEditorPositionInViewport,
   moveEditableImageAnnotation,
   parseImageAnnotations,
   removeEditableImageAnnotation,
@@ -117,5 +118,23 @@ describe("image annotations", () => {
   test("keeps the inline editor aligned beside its marker and allows overflow", () => {
     expect(imageAnnotationEditorPosition(2, 2, 800, 600)).toEqual({ left: 40, top: -12, width: 292 });
     expect(imageAnnotationEditorPosition(98, 98, 800, 600)).toEqual({ left: 808, top: 564, width: 292 });
+  });
+
+  test("keeps the inline editor inside the visible zoomed viewport", () => {
+    expect(imageAnnotationEditorPositionInViewport(98, 98, 1200, 900, {
+      canvasLeft: -180,
+      canvasTop: -240,
+      width: 1000,
+      height: 620,
+      margin: 12
+    })).toEqual({ left: 860, top: 800, width: 292 });
+
+    expect(imageAnnotationEditorPositionInViewport(2, 2, 1200, 900, {
+      canvasLeft: -180,
+      canvasTop: -240,
+      width: 1000,
+      height: 620,
+      margin: 12
+    })).toEqual({ left: 192, top: 252, width: 292 });
   });
 });

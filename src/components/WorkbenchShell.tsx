@@ -16,6 +16,7 @@ import { CasesPage } from "../pages/CasesPage";
 import { ChatPage } from "../pages/ChatPage";
 import { ImagesPage } from "../pages/ImagesPage";
 import { InspirationBarragePage } from "../pages/InspirationBarragePage";
+import { ImageProvenancePage } from "../pages/ImageProvenancePage";
 import { PromptTemplateEditorPage, PromptTemplatesPage } from "../pages/PromptTemplatesPage";
 import { SharedConversationPage } from "../pages/SharedConversationPage";
 import { useWorkbench } from "../store/workbench";
@@ -33,6 +34,7 @@ import { ProjectLogo } from "./ProjectLogo";
 import { SearchChatModal } from "./SearchChatModal";
 import { ArchivedChatsDialog } from "./settings/ArchivedChatsDialog";
 import { AppSettingsDialog } from "./settings/AppSettingsDialog";
+import { MoreToolsMenu } from "./sidebar/MoreToolsMenu";
 import { SessionActionsMenu } from "./sidebar/SessionActionsMenu";
 
 type HelpCenterPageModule = typeof import("../pages/HelpCenterPage");
@@ -91,8 +93,12 @@ function mergeAbortSignals(...signals: AbortSignal[]) {
   return controller.signal;
 }
 
-const SIDEBAR_MAIN_NAV_PATHS = ["/cases", "/assets", "/images", "/prompt-templates"];
-const SIDEBAR_MAIN_NAV_PATH_SET = new Set<string>(SIDEBAR_MAIN_NAV_PATHS);
+const SIDEBAR_MAIN_NAV_PATHS = ["/cases", "/assets", "/images"];
+const SIDEBAR_MAIN_NAV_PATH_SET = new Set<string>([
+  ...SIDEBAR_MAIN_NAV_PATHS,
+  "/image-provenance",
+  "/prompt-templates"
+]);
 const SESSION_GROUP_COLLAPSE_STORAGE_KEY = "gpt-image.sidebar.session-groups.collapsed";
 const IMAGE_EDIT_SUGGESTIONS_STALE_MS = 5 * 60 * 1000;
 const AVATAR_CROP_VIEWPORT_SIZE = 280;
@@ -117,7 +123,7 @@ function routeTransitionIndex(path: string) {
   if (path === "/cases" || path.startsWith("/cases/")) return 0;
   if (path === "/assets") return 1;
   if (path === "/images") return 2;
-  if (path === "/prompt-templates" || path.startsWith("/prompt-templates/")) return 3;
+  if (path === "/image-provenance" || path === "/prompt-templates" || path.startsWith("/prompt-templates/")) return 3;
   if (path === "/help") return 4;
   return -1;
 }
@@ -386,6 +392,9 @@ export function WorkbenchShell({ user }: { user: User }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const location = useLocation();
+  const moreRouteActive = location.pathname === "/image-provenance"
+    || location.pathname === "/prompt-templates"
+    || location.pathname.startsWith("/prompt-templates/");
   const { showToast } = useToast();
   const { resolvedLanguage, t } = useI18n();
   const imageTaskSoundCatalog = useQuery({
@@ -435,6 +444,7 @@ export function WorkbenchShell({ user }: { user: User }) {
   const [deleteAccountConfirmOpen, setDeleteAccountConfirmOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [archivedChatsOpen, setArchivedChatsOpen] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [openSessionMenuId, setOpenSessionMenuId] = useState<string | null>(null);
   const [topSessionMenuOpen, setTopSessionMenuOpen] = useState(false);
   const [deleteSessionTarget, setDeleteSessionTarget] = useState<DeleteSessionTarget | null>(null);
@@ -1055,6 +1065,10 @@ export function WorkbenchShell({ user }: { user: User }) {
     closeCollapsedRecent();
   }, [closeCollapsedRecent, location.pathname, sidebarCollapsed]);
 
+  useEffect(() => {
+    setMoreMenuOpen(false);
+  }, [location.pathname, sidebarCollapsed]);
+
   useEffect(
     () => () => {
       clearUserCardCloseTimer();
@@ -1339,6 +1353,13 @@ export function WorkbenchShell({ user }: { user: User }) {
     navigateMainRoute(path);
   }, [navigateMainRoute, pauseRenderingBeforeRouteNavigation, setMobileMenuOpen]);
 
+  const handleMoreToolSelect = useCallback((path: "/prompt-templates" | "/image-provenance") => {
+    pauseRenderingBeforeRouteNavigation();
+    setMoreMenuOpen(false);
+    setMobileMenuOpen(false);
+    navigateMainRoute(path);
+  }, [navigateMainRoute, pauseRenderingBeforeRouteNavigation, setMobileMenuOpen]);
+
   const animateSidebarSelection = useCallback((target: HTMLElement, selectionKey: string) => {
     const container = sidebarScrollContentRef.current;
     const indicator = sidebarSelectionIndicatorRef.current;
@@ -1347,7 +1368,7 @@ export function WorkbenchShell({ user }: { user: User }) {
     moveSidebarSelectionIndicator(container, indicator, target, true);
   }, []);
 
-  const handleSidebarMainNavPointerDown = useCallback((event: ReactPointerEvent<HTMLAnchorElement>, index: number) => {
+  const handleSidebarMainNavPointerDown = useCallback((event: ReactPointerEvent<HTMLElement>, index: number) => {
     pauseRenderingBeforeRouteNavigation();
     const path = SIDEBAR_MAIN_NAV_PATHS[index];
     if (event.button === 0 && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && path) {
@@ -1519,6 +1540,8 @@ export function WorkbenchShell({ user }: { user: User }) {
       container.classList.remove("is-selection-animating");
     };
     const target = container.querySelector<HTMLElement>(
+      '.main-nav .nav-item[data-sidebar-selection-key="nav:/more"][aria-expanded="true"]'
+    ) ?? container.querySelector<HTMLElement>(
       '.main-nav .nav-item[aria-current="page"], .recent-row.active'
     );
     if (!target || target.closest(".session-group.collapsed")) {
@@ -1534,7 +1557,12 @@ export function WorkbenchShell({ user }: { user: User }) {
         .join(":");
     };
     if (!(indicator.dataset.selectionKey === selectionKey && indicator.getAnimations().length > 0)) {
-      moveSidebarSelectionIndicator(container, indicator, target, false);
+      moveSidebarSelectionIndicator(
+        container,
+        indicator,
+        target,
+        Boolean(indicator.dataset.selectionKey && indicator.dataset.selectionKey !== selectionKey)
+      );
     }
 
     let lastGeometryKey = geometryKeyFor(target);
@@ -1542,6 +1570,8 @@ export function WorkbenchShell({ user }: { user: User }) {
     const syncIndicator = () => {
       frame = 0;
       const nextTarget = container.querySelector<HTMLElement>(
+        '.main-nav .nav-item[data-sidebar-selection-key="nav:/more"][aria-expanded="true"]'
+      ) ?? container.querySelector<HTMLElement>(
         '.main-nav .nav-item[aria-current="page"], .recent-row.active'
       );
       if (!nextTarget || nextTarget.closest(".session-group.collapsed")) return;
@@ -1568,7 +1598,7 @@ export function WorkbenchShell({ user }: { user: User }) {
       shell?.removeEventListener("transitionend", scheduleSync);
       sidebar?.removeEventListener("transitionend", scheduleSync);
     };
-  }, [location.pathname, sessionGroupsCollapsed.pinned, sessionGroupsCollapsed.recent, sidebarCollapsed, sidebarMotionState, sidebarSessionLayoutKey]);
+  }, [location.pathname, moreMenuOpen, sessionGroupsCollapsed.pinned, sessionGroupsCollapsed.recent, sidebarCollapsed, sidebarMotionState, sidebarSessionLayoutKey]);
 
   const renderSessionRows = (sessionRows: ChatSession[]) =>
     sessionRows.map((session) => {
@@ -1770,7 +1800,6 @@ export function WorkbenchShell({ user }: { user: User }) {
             <span className="sidebar-selection-indicator" ref={sidebarSelectionIndicatorRef} aria-hidden="true" />
             <nav
               className="main-nav"
-              onClick={() => setMobileMenuOpen(false)}
             >
               <NavLink
                 to="/cases"
@@ -1808,18 +1837,12 @@ export function WorkbenchShell({ user }: { user: User }) {
                 <Images size={18} />
                 <span>{t("sidebar.images")}</span>
               </NavLink>
-              <NavLink
-                to="/prompt-templates"
-                className={({ isActive }) => cx("nav-item", isActive && "active")}
-                aria-label={t("sidebar.promptCreation")}
-                data-sidebar-tip={t("sidebar.promptCreation")}
-                data-sidebar-selection-key="nav:/prompt-templates"
-                onPointerDown={(event) => handleSidebarMainNavPointerDown(event, 3)}
-                onClick={(event) => handleMainRouteNavigation(event, "/prompt-templates")}
-              >
-                <Sparkles size={18} />
-                <span>{t("sidebar.promptCreation")}</span>
-              </NavLink>
+              <MoreToolsMenu
+                open={moreMenuOpen}
+                active={moreRouteActive}
+                onOpenChange={setMoreMenuOpen}
+                onSelect={handleMoreToolSelect}
+              />
             </nav>
             <div className="collapsed-recent-wrap" ref={collapsedRecentRef}>
               <button
@@ -2213,6 +2236,7 @@ export function WorkbenchShell({ user }: { user: User }) {
               )}
             />
             <Route path="/cases/barrage" element={<PageRouteTransition key="cases-barrage"><InspirationBarragePage /></PageRouteTransition>} />
+            <Route path="/image-provenance" element={<PageRouteTransition key="image-provenance"><ImageProvenancePage /></PageRouteTransition>} />
             <Route path="/prompt-templates" element={<PageRouteTransition key="prompt-templates"><PromptTemplatesPage /></PageRouteTransition>} />
             <Route path="/prompt-templates/:templateId/edit" element={<PageRouteTransition key="prompt-template-editor"><PromptTemplateEditorPage /></PageRouteTransition>} />
             <Route

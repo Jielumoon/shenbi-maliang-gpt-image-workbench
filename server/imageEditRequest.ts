@@ -5,6 +5,8 @@ import {
   type ImageAnnotation,
   type ImageEditIntent
 } from "../src/lib/imageAnnotations";
+import { appendDrawingReferenceInstruction } from "../src/lib/drawingReference";
+import { appendImageMarkupInstruction } from "../src/lib/imageMarkup";
 
 const MASK_EDIT_INSTRUCTION =
   "严格只在遮罩选区内修改，新增或替换内容必须与选区位置对齐，并符合原图透视、光影、材质和风格，自然融合到画面中，不得移到选区外；未选区域保持原图不变。遮罩不是画面内容，不要生成遮罩颜色、边框或涂抹痕迹。";
@@ -65,12 +67,16 @@ export function finalizeProviderEditPrompt(options: {
   basePrompt: string;
   editIntent: ImageEditIntent;
   hasMask: boolean;
+  drawingReference?: boolean;
+  imageMarkupReference?: boolean;
 }) {
   if (options.editIntent === "remove") {
     return options.hasMask
       ? [REMOVE_SELECTED_AREA_PROMPT, "", MASK_EDIT_INSTRUCTION].join("\n")
       : REMOVE_SELECTED_AREA_PROMPT;
   }
-  if (!options.hasMask) return options.basePrompt;
-  return [options.basePrompt, "", MASK_EDIT_INSTRUCTION].join("\n");
+  const drawingPrompt = appendDrawingReferenceInstruction(options.basePrompt, options.drawingReference === true);
+  const referencePrompt = appendImageMarkupInstruction(drawingPrompt, options.imageMarkupReference === true);
+  if (!options.hasMask) return referencePrompt;
+  return [referencePrompt, "", MASK_EDIT_INSTRUCTION].join("\n");
 }

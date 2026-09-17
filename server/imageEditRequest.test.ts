@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { REMOVE_SELECTED_AREA_PROMPT } from "../src/lib/imageAnnotations";
+import { DRAWING_REFERENCE_PROMPT_INSTRUCTION } from "../src/lib/drawingReference";
+import { IMAGE_MARKUP_PROMPT_INSTRUCTION } from "../src/lib/imageMarkup";
 import { finalizeProviderEditPrompt, normalizeImageEditRequest } from "./imageEditRequest";
 
 describe("image edit request modes", () => {
@@ -64,6 +66,45 @@ describe("image edit request modes", () => {
       editIntent: "standard",
       hasMask: false
     })).toBe("整体调亮");
+  });
+
+  test("adds drawing-reference guidance without changing ordinary edits", () => {
+    const drawingPrompt = finalizeProviderEditPrompt({
+      basePrompt: "生成一个女生",
+      editIntent: "standard",
+      hasMask: false,
+      drawingReference: true
+    });
+    expect(drawingPrompt).toContain("生成一个女生");
+    expect(drawingPrompt).toContain(DRAWING_REFERENCE_PROMPT_INSTRUCTION);
+    expect(finalizeProviderEditPrompt({
+      basePrompt: drawingPrompt,
+      editIntent: "standard",
+      hasMask: false,
+      drawingReference: true
+    })).toBe(drawingPrompt);
+    expect(finalizeProviderEditPrompt({
+      basePrompt: "生成一个女生",
+      editIntent: "standard",
+      hasMask: false
+    })).toBe("生成一个女生");
+  });
+
+  test("adds image-markup guidance once without changing the visible prompt", () => {
+    const markupPrompt = finalizeProviderEditPrompt({
+      basePrompt: "把箭头指向的位置改成蓝色",
+      editIntent: "standard",
+      hasMask: false,
+      imageMarkupReference: true
+    });
+    expect(markupPrompt).toContain("把箭头指向的位置改成蓝色");
+    expect(markupPrompt).toContain(IMAGE_MARKUP_PROMPT_INSTRUCTION);
+    expect(finalizeProviderEditPrompt({
+      basePrompt: markupPrompt,
+      editIntent: "standard",
+      hasMask: false,
+      imageMarkupReference: true
+    })).toBe(markupPrompt);
   });
 
   test("rejects annotation combinations in other modes", () => {

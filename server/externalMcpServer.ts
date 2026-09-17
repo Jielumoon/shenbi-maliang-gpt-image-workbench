@@ -21,6 +21,13 @@ import { readCodexPluginVersion } from "./internalDistributionRoutes";
 import { LimitedRequestBodyError, requestWithLimitedBody } from "./limitedRequestBody";
 import type { ImageRow, UserRow } from "./types";
 import { MAX_IMAGE_COUNT, MIN_IMAGE_COUNT } from "../src/lib/imagePromptCount";
+import {
+  DEFAULT_EDIT_IMAGE_MODEL,
+  DEFAULT_GENERATION_IMAGE_MODEL,
+  DEFAULT_IMAGE_QUALITY,
+  GPT_IMAGE_25_QUALITIES,
+  IMAGE_MODEL_IDS
+} from "../src/lib/imageModels";
 
 type McpToolExtra = {
   authInfo?: {
@@ -40,6 +47,8 @@ export const EXTERNAL_MCP_IMAGE_COUNT_SCHEMA = z.number()
   .max(MAX_IMAGE_COUNT);
 export const EXTERNAL_MCP_IMAGE_BACKGROUND_SCHEMA = z.enum(["auto", "opaque", "transparent"]);
 export const EXTERNAL_MCP_IMAGE_OUTPUT_FORMAT_SCHEMA = z.enum(["png", "webp"]);
+export const EXTERNAL_MCP_IMAGE_MODEL_SCHEMA = z.enum(IMAGE_MODEL_IDS);
+export const EXTERNAL_MCP_IMAGE_QUALITY_SCHEMA = z.enum(["auto", ...GPT_IMAGE_25_QUALITIES]);
 
 function toolError(message: string) {
   return { isError: true as const, content: [{ type: "text" as const, text: message }] };
@@ -256,8 +265,9 @@ async function createMaliangMcpServer(api: Hono) {
     description: "提交一个异步文生图任务，返回 jobId。随后调用 maliang_get_image_job 获取结果。",
     inputSchema: {
       prompt: z.string().trim().min(1).max(8000).describe("图片描述或绘图提示词"),
+      model: EXTERNAL_MCP_IMAGE_MODEL_SCHEMA.optional().describe("图片模型：Flare 适合快速生成，Sunburst 适合精修，也可使用 GPT Image 2 兼容模式"),
       size: z.string().trim().optional().describe("图片尺寸，例如 1024x1024、1024x1536 或 1536x1024"),
-      quality: z.string().trim().optional().describe("生成质量，例如 low、medium、high 或 auto"),
+      quality: EXTERNAL_MCP_IMAGE_QUALITY_SCHEMA.optional().describe("生成质量：auto、low、medium、high、xhigh 或 max"),
       imageCount: EXTERNAL_MCP_IMAGE_COUNT_SCHEMA.optional()
         .describe(`生成数量，范围 ${MIN_IMAGE_COUNT}-${MAX_IMAGE_COUNT}，默认 ${MIN_IMAGE_COUNT}；提示词中明确指定的数量优先`),
       background: EXTERNAL_MCP_IMAGE_BACKGROUND_SCHEMA.optional()
@@ -274,8 +284,9 @@ async function createMaliangMcpServer(api: Hono) {
     try {
       const payload = await internalImageRequest(api, "/images/generate", context.token, context.resource, {
         prompt: input.prompt,
+        model: input.model ?? DEFAULT_GENERATION_IMAGE_MODEL,
         ...(input.size ? { size: input.size } : {}),
-        ...(input.quality ? { quality: input.quality } : {}),
+        quality: input.quality ?? DEFAULT_IMAGE_QUALITY,
         ...(input.imageCount ? { n: input.imageCount } : {}),
         ...(input.background ? { background: input.background } : {}),
         ...(input.outputFormat ? { outputFormat: input.outputFormat } : {}),
@@ -339,10 +350,11 @@ async function createMaliangMcpServer(api: Hono) {
     description: "使用马良历史图片 imageIds 或已完成的一次性上传 uploadIds 提交异步改图任务。返回 jobId 后调用 maliang_get_image_job。",
     inputSchema: {
       prompt: z.string().trim().min(1).max(8000).describe("希望如何修改图片"),
+      model: EXTERNAL_MCP_IMAGE_MODEL_SCHEMA.optional().describe("图片模型，默认使用 GPT Image 2.5 Flare"),
       imageIds: z.array(z.string().trim().min(1)).max(8).optional().describe("当前账号中的马良历史图片 ID"),
       uploadIds: z.array(z.string().trim().min(1)).max(8).optional().describe("已上传完成的 MCP uploadId"),
       size: z.string().trim().optional(),
-      quality: z.string().trim().optional(),
+      quality: EXTERNAL_MCP_IMAGE_QUALITY_SCHEMA.optional(),
       imageCount: EXTERNAL_MCP_IMAGE_COUNT_SCHEMA.optional()
         .describe(`生成数量，范围 ${MIN_IMAGE_COUNT}-${MAX_IMAGE_COUNT}，默认 ${MIN_IMAGE_COUNT}；提示词中明确指定的数量优先`),
       background: EXTERNAL_MCP_IMAGE_BACKGROUND_SCHEMA.optional()
@@ -373,10 +385,11 @@ async function createMaliangMcpServer(api: Hono) {
     try {
       const payload = await internalImageRequest(api, "/images/edit", context.token, context.resource, {
         prompt: input.prompt,
+        model: input.model ?? DEFAULT_EDIT_IMAGE_MODEL,
         sourceImageIds: imageIds,
         sourceAssetIds,
         ...(input.size ? { size: input.size } : {}),
-        ...(input.quality ? { quality: input.quality } : {}),
+        quality: input.quality ?? DEFAULT_IMAGE_QUALITY,
         ...(input.imageCount ? { n: input.imageCount } : {}),
         ...(input.background ? { background: input.background } : {}),
         ...(input.outputFormat ? { outputFormat: input.outputFormat } : {}),

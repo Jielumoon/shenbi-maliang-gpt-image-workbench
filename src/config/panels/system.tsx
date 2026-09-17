@@ -8,6 +8,7 @@ import {
   Bot,
   Bug,
   Check,
+  Copy,
   Database,
   Download,
   FolderOpen,
@@ -32,7 +33,8 @@ import {
   Trash2,
   Upload,
   Users,
-  WandSparkles
+  WandSparkles,
+  X
 } from "lucide-react";
 import { api, configApi } from "../../api";
 import { LightweightLineChart } from "../../components/LightweightChart";
@@ -62,6 +64,8 @@ import type {
   ProviderConfig,
   ProviderRequestLog,
   ProxyConfig,
+  RuntimeLogLevel,
+  RuntimeLogSource,
   SafetyReviewLog,
   SafetyReviewSettings,
   SitePublicUrlSource,
@@ -73,7 +77,7 @@ import type {
   Team
 } from "../../types";
 import type { ConfigAssetReviewItem, ConfigCaseReviewItem } from "../../api/config";
-import { ConfirmDialog, CustomSelect, PromptDialog, useToast } from "../../ui";
+import { ConfirmDialog, CustomSelect, ModalPortal, PromptDialog, useToast } from "../../ui";
 import {
   ConfigHeader,
   GlobalSwitchRow,
@@ -1172,6 +1176,7 @@ export function ProxyPanel() {
 function emptyDebugSettings(): DebugSettings {
   return {
     imageEditMask: false,
+    runtimeLogging: false,
     updatedAt: ""
   };
 }
@@ -1181,7 +1186,28 @@ export function DebugSettingsPanel() {
   const { showToast } = useToast();
   const debug = useQuery({ queryKey: ["config-debug"], queryFn: configApi.debug });
   const [form, setForm] = useState<DebugSettings>(emptyDebugSettings());
-  const [switchTarget, setSwitchTarget] = useState<{ key: "imageEditMask"; checked: boolean } | null>(null);
+  const [switchTarget, setSwitchTarget] = useState<{ key: "imageEditMask" | "runtimeLogging"; checked: boolean } | null>(null);
+  const [selectedLogFile, setSelectedLogFile] = useState("");
+  const [logLevel, setLogLevel] = useState<RuntimeLogLevel | "all">("all");
+  const [logSource, setLogSource] = useState<RuntimeLogSource | "all">("all");
+  const [rawLogFile, setRawLogFile] = useState("");
+  const [rawLogVersion, setRawLogVersion] = useState(0);
+  const runtimeLogs = useQuery({
+    queryKey: ["config-runtime-logs", selectedLogFile, logLevel, logSource],
+    queryFn: () => configApi.runtimeLogs({ file: selectedLogFile, level: logLevel, source: logSource, limit: 200 })
+  });
+  const openLogDirectory = useMutation({
+    mutationFn: configApi.openRuntimeLogDirectory,
+    onSuccess: () => showToast("日志目录已打开"),
+    onError: (error) => showToast(error instanceof Error ? error.message : "日志目录打开失败", "error")
+  });
+  const rawLog = useInfiniteQuery({
+    queryKey: ["config-runtime-log-raw", rawLogFile, rawLogVersion],
+    queryFn: ({ pageParam }) => configApi.runtimeLogRaw(rawLogFile, pageParam ?? undefined),
+    initialPageParam: null as number | null,
+    getNextPageParam: (lastPage) => lastPage.hasEarlier ? lastPage.start : undefined,
+    enabled: Boolean(rawLogFile)
+  });
   const save = useMutation({
     mutationFn: (next: DebugSettings) => configApi.saveDebug(next),
     onSuccess: (data) => {
@@ -1189,6 +1215,7 @@ export function DebugSettingsPanel() {
       setSwitchTarget(null);
       showToast("调试配置已保存");
       queryClient.invalidateQueries({ queryKey: ["config-debug"] });
+      queryClient.invalidateQueries({ queryKey: ["config-runtime-logs"] });
     }
   });
 
@@ -1196,7 +1223,14 @@ export function DebugSettingsPanel() {
     if (debug.data?.debug) setForm(debug.data.debug);
   }, [debug.data?.debug]);
 
-  function applyDebugSwitch(key: "imageEditMask", checked: boolean) {
+  useEffect(() => {
+    if (!selectedLogFile && runtimeLogs.data?.selectedFile) setSelectedLogFile(runtimeLogs.data.selectedFile);
+    if (selectedLogFile && runtimeLogs.data && !runtimeLogs.data.files.some((file) => file.name === selectedLogFile)) {
+      setSelectedLogFile(runtimeLogs.data.selectedFile || "");
+    }
+  }, [runtimeLogs.data, selectedLogFile]);
+
+  function applyDebugSwitch(key: "imageEditMask" | "runtimeLogging", checked: boolean) {
     if (save.isPending) return;
     const previous = form;
     const next = { ...form, [key]: checked };
@@ -1208,6 +1242,28 @@ export function DebugSettingsPanel() {
       }
     });
   }
+
+  async function copyRuntimeLogDirectory() {
+    const directory = runtimeLogStatus?.absoluteDirectory;
+    if (!directory) return;
+    const copied = await copyTextToClipboard(directory);
+    showToast(copied ? "日志目录路径已复制" : "日志目录路径复制失败", copied ? "success" : "error");
+  }
+
+  const runtimeLogStatus = debug.data?.runtimeLog ?? runtimeLogs.data?.status;
+  const logFileOptions = (runtimeLogs.data?.files ?? []).map((file) => ({
+    value: file.name,
+    label: `${file.name} · ${formatImageFileSize(file.size)}`,
+    labelNoTranslate: true
+  }));
+  const rawLogPages = rawLog.data?.pages ?? [];
+  const rawLogContent = useMemo(
+    () => [...rawLogPages].reverse().map((page) => page.content).join(""),
+    [rawLogPages]
+  );
+  const newestRawLogPage = rawLogPages[0];
+  const oldestRawLogPage = rawLogPages.at(-1);
+  const switchIsRuntimeLogging = switchTarget?.key === "runtimeLogging";
 
   return (
     <section className="config-card">
@@ -1228,14 +1284,169 @@ export function DebugSettingsPanel() {
             onChange={(checked) => setSwitchTarget({ key: "imageEditMask", checked })}
           />
         </div>
+        <div className="switch-row debug-setting-row">
+          <span className="debug-setting-copy">
+            <strong>运行故障日志</strong>
+            <small>记录服务端警告、错误、5xx、慢请求、进程异常及已登录页面异常；不记录请求正文、提示词或密钥。</small>
+          </span>
+          <SwitchControl
+            checked={form.runtimeLogging}
+            disabled={save.isPending}
+            label={form.runtimeLogging ? "已启用" : "已关闭"}
+            onChange={(checked) => setSwitchTarget({ key: "runtimeLogging", checked })}
+          />
+        </div>
         {form.updatedAt ? <div className="debug-setting-meta">最近更新：{formatDate(form.updatedAt)}</div> : null}
       </div>
       {save.error ? <div className="form-error">{save.error.message}</div> : null}
+      <div className="runtime-log-section">
+        <div className="runtime-log-heading">
+          <div>
+            <h2>运行日志</h2>
+            <p>日志保留 14 天，单文件 20 MB，总量最多 200 MB。关闭开关不会删除已有日志。</p>
+          </div>
+          <span className={cx(
+            "runtime-log-health",
+            runtimeLogStatus && !runtimeLogStatus.enabled && "disabled",
+            runtimeLogStatus?.healthy === false && "degraded"
+          )}>
+            {runtimeLogStatus?.enabled
+              ? runtimeLogStatus.healthy ? "记录正常" : "写入异常"
+              : "已停止记录"}
+          </span>
+        </div>
+        {runtimeLogStatus ? (
+          <div className="runtime-log-status-grid">
+            <span><small>日志目录</small><strong data-config-no-translate="true" title={runtimeLogStatus.absoluteDirectory}>{runtimeLogStatus.absoluteDirectory}</strong></span>
+            <span><small>当前文件</small><strong data-config-no-translate="true">{runtimeLogStatus.currentFile || "-"}</strong></span>
+            <span><small>最后写入</small><strong>{runtimeLogStatus.lastWriteAt ? formatDate(runtimeLogStatus.lastWriteAt) : "-"}</strong></span>
+          </div>
+        ) : null}
+        {runtimeLogStatus?.lastError ? <div className="form-error">日志写入异常：{runtimeLogStatus.lastError}</div> : null}
+        <div className="runtime-log-actions">
+          <CustomSelect
+            value={selectedLogFile}
+            options={logFileOptions}
+            onChange={setSelectedLogFile}
+            placeholder="暂无日志文件"
+            disabled={logFileOptions.length === 0}
+            className="runtime-log-file-select"
+            menuWidth={320}
+          />
+          <CustomSelect
+            value={logLevel}
+            onChange={(value) => setLogLevel(value as RuntimeLogLevel | "all")}
+            options={[
+              { value: "all", label: "全部级别" },
+              { value: "warn", label: "警告" },
+              { value: "error", label: "错误与严重错误" },
+              { value: "info", label: "信息" }
+            ]}
+            className="runtime-log-filter-select"
+            menuWidth={180}
+          />
+          <CustomSelect
+            value={logSource}
+            onChange={(value) => setLogSource(value as RuntimeLogSource | "all")}
+            options={[
+              { value: "all", label: "全部来源" },
+              { value: "server", label: "服务端" },
+              { value: "http", label: "接口" },
+              { value: "client", label: "浏览器" }
+            ]}
+            className="runtime-log-filter-select"
+            menuWidth={160}
+          />
+          <button
+            className="secondary-btn"
+            type="button"
+            title="在运行服务的电脑上打开日志目录"
+            onClick={() => openLogDirectory.mutate()}
+            disabled={openLogDirectory.isPending}
+          >
+            <FolderOpen size={16} />
+            {openLogDirectory.isPending ? "正在打开" : "打开日志目录"}
+          </button>
+          <button
+            className="secondary-btn"
+            type="button"
+            onClick={() => void copyRuntimeLogDirectory()}
+            disabled={!runtimeLogStatus?.absoluteDirectory}
+          >
+            <Copy size={16} />
+            复制目录路径
+          </button>
+          <button className="secondary-btn" type="button" onClick={() => runtimeLogs.refetch()} disabled={runtimeLogs.isFetching}>
+            <RefreshCw size={16} className={runtimeLogs.isFetching ? "spin" : undefined} />
+            刷新
+          </button>
+          {selectedLogFile ? (
+            <>
+              <button
+                className="secondary-btn"
+                type="button"
+                onClick={() => {
+                  setRawLogFile(selectedLogFile);
+                  setRawLogVersion((value) => value + 1);
+                }}
+              >
+                <ScrollText size={16} />
+                查看原始日志
+              </button>
+              <a className="secondary-btn" href={configApi.runtimeLogDownloadUrl(selectedLogFile)} download>
+                <Download size={16} />
+                下载日志
+              </a>
+            </>
+          ) : null}
+        </div>
+        {runtimeLogs.error ? <div className="form-error">{runtimeLogs.error.message}</div> : null}
+        <div className="runtime-log-list">
+          {runtimeLogs.data?.entries.map((entry) => (
+            <article className="runtime-log-entry" key={entry.id}>
+              <div className="runtime-log-entry-head">
+                <span className={cx("runtime-log-level", `level-${entry.level}`)}>{entry.level.toUpperCase()}</span>
+                <strong data-config-no-translate="true">{entry.event}</strong>
+                <time>{formatDate(entry.timestamp)}</time>
+              </div>
+              <p data-config-no-translate="true">{entry.message}</p>
+              <div className="runtime-log-entry-meta" data-config-no-translate="true">
+                <span>{entry.source}</span>
+                {entry.method ? <span>{entry.method} {entry.path}</span> : null}
+                {entry.status ? <span>HTTP {entry.status}</span> : null}
+                {entry.durationMs != null ? <span>{entry.durationMs} ms</span> : null}
+                {entry.requestId ? <span>Request ID: {entry.requestId}</span> : null}
+                {entry.userId ? <span>User: {entry.userId}</span> : null}
+              </div>
+              {entry.stack || entry.details ? (
+                <details className="runtime-log-details">
+                  <summary>查看详情</summary>
+                  {entry.stack ? <pre data-config-no-translate="true">{entry.stack}</pre> : null}
+                  {entry.details ? <pre data-config-no-translate="true">{JSON.stringify(entry.details, null, 2)}</pre> : null}
+                </details>
+              ) : null}
+            </article>
+          ))}
+          {!runtimeLogs.isLoading && (runtimeLogs.data?.entries.length ?? 0) === 0 ? (
+            <div className="settings-empty">暂无符合条件的运行日志</div>
+          ) : null}
+        </div>
+        {runtimeLogs.data?.truncated ? <div className="request-log-load-state">仅显示最近 200 条匹配日志，可下载文件查看完整内容。</div> : null}
+        <div className="runtime-log-boundary-note">
+          OOM、断电、系统强制终止或容器被直接杀死时，应用可能来不及写入最后一条日志，需要同时查看宿主机或容器日志。
+        </div>
+      </div>
       <ConfirmDialog
         open={Boolean(switchTarget)}
-        title={switchTarget?.checked ? "开启调试保存" : "关闭调试保存"}
+        title={switchIsRuntimeLogging
+          ? switchTarget?.checked ? "开启运行故障日志" : "关闭运行故障日志"
+          : switchTarget?.checked ? "开启调试保存" : "关闭调试保存"}
         description={
-          switchTarget?.checked
+          switchIsRuntimeLogging
+            ? switchTarget?.checked
+              ? "确认开启运行故障日志？开启后会立即记录新的服务端与已登录页面异常，可能包含经过脱敏的错误堆栈。"
+              : "确认关闭运行故障日志？关闭后将停止新增记录，但已有日志仍可预览和下载。"
+            : switchTarget?.checked
             ? "确认开启调试保存？开启后会保存编辑遮罩和请求信息，方便排查图片编辑问题。"
             : "确认关闭调试保存？关闭后新的图片编辑不会再保存这些调试文件。"
         }
@@ -1247,6 +1458,57 @@ export function DebugSettingsPanel() {
           applyDebugSwitch(switchTarget.key, switchTarget.checked);
         }}
       />
+      {rawLogFile ? (
+        <ModalPortal>
+          <div className="modal-backdrop runtime-log-raw-backdrop">
+            <section className="case-modal runtime-log-raw-modal">
+              <header>
+                <div>
+                  <h3>原始日志内容</h3>
+                  <small data-config-no-translate="true">{rawLogFile}</small>
+                </div>
+                <button type="button" onClick={() => setRawLogFile("")} aria-label="关闭">
+                  <X size={18} />
+                </button>
+              </header>
+              <div className="runtime-log-raw-toolbar">
+                <span>
+                  {newestRawLogPage && oldestRawLogPage
+                    ? `已加载 ${formatImageFileSize(newestRawLogPage.size - oldestRawLogPage.start)} / ${formatImageFileSize(newestRawLogPage.size)}`
+                    : "正在读取日志..."}
+                </span>
+                <div>
+                  <button
+                    className="secondary-btn"
+                    type="button"
+                    onClick={() => rawLog.fetchNextPage()}
+                    disabled={!rawLog.hasNextPage || rawLog.isFetchingNextPage}
+                  >
+                    {rawLog.isFetchingNextPage ? "加载中" : rawLog.hasNextPage ? "加载更早内容" : "已到文件开头"}
+                  </button>
+                  <button
+                    className="secondary-btn"
+                    type="button"
+                    onClick={() => setRawLogVersion((value) => value + 1)}
+                    disabled={rawLog.isFetching}
+                  >
+                    <RefreshCw size={16} className={rawLog.isFetching ? "spin" : undefined} />
+                    刷新到最新
+                  </button>
+                  <a className="secondary-btn" href={configApi.runtimeLogDownloadUrl(rawLogFile)} download>
+                    <Download size={16} />
+                    下载日志
+                  </a>
+                </div>
+              </div>
+              {rawLog.error ? <div className="form-error">{rawLog.error.message}</div> : null}
+              <pre className="runtime-log-raw-content" data-config-no-translate="true">
+                {rawLogContent || (rawLog.isLoading ? "正在读取日志..." : "日志文件为空")}
+              </pre>
+            </section>
+          </div>
+        </ModalPortal>
+      ) : null}
     </section>
   );
 }

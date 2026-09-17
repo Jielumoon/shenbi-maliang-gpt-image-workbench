@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown, Image as ImageIcon, ImagePlus, Layers2, Ratio } from "lucide-react";
+import { Brain, Check, ChevronDown, Image as ImageIcon, ImagePlus, Layers2, Ratio } from "lucide-react";
 import { useI18n, type Translate } from "../i18n";
 import type { ImageBackgroundOption } from "../lib/imageBackground";
 import {
@@ -10,6 +10,7 @@ import {
   type SizeOption
 } from "../lib/imageOptions";
 import { MAX_IMAGE_COUNT, MIN_IMAGE_COUNT } from "../lib/imagePromptCount";
+import { IMAGE_MODEL_OPTIONS, imageModelDisplayName, type ImageModelId } from "../lib/imageModels";
 
 function sizePreviewStyle(previewRatio?: string, box = 22) {
   const match = previewRatio?.match(/^(\d+)\s*\/\s*(\d+)$/);
@@ -41,6 +42,71 @@ function qualityOptionDescription(option: QualityOption, t: Translate) {
   if (!option.descriptionKey) return option.description;
   if (option.descriptionKey === "picker.quality.custom") return t(option.descriptionKey, { quality: option.value });
   return t(option.descriptionKey);
+}
+
+export function ModelPicker({
+  value,
+  onChange
+}: {
+  value: ImageModelId;
+  onChange: (value: ImageModelId) => void;
+}) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const selected = IMAGE_MODEL_OPTIONS.find((item) => item.value === value) ?? IMAGE_MODEL_OPTIONS[0];
+
+  useEffect(() => {
+    if (!open) return;
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target as Node;
+      if (!wrapRef.current?.contains(target)) setOpen(false);
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [open]);
+
+  return (
+    <div className="size-picker model-picker" ref={wrapRef}>
+      <button
+        type="button"
+        className="model-picker-trigger"
+        data-tooltip={t("picker.model.tooltip")}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((next) => !next)}
+      >
+        <span className="size-trigger-icon model-trigger-icon" aria-hidden="true">
+          <Brain size={15} />
+        </span>
+        <span>{imageModelDisplayName(selected.value)}</span>
+        <ChevronDown size={15} className={open ? "open" : ""} />
+      </button>
+      {open ? (
+        <div className="size-picker-menu model-picker-menu" role="listbox">
+          {IMAGE_MODEL_OPTIONS.map((option) => (
+            <button
+              type="button"
+              key={option.value}
+              role="option"
+              aria-selected={option.value === value}
+              className={option.value === value ? "active" : ""}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+            >
+              <span className="model-option-copy">
+                <strong>{imageModelDisplayName(option.value)}</strong>
+                <small>{t(option.descriptionKey)}</small>
+              </span>
+              {option.value === value ? <Check className="size-option-check" size={16} /> : <span />}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function EditorSizePicker({
@@ -232,7 +298,7 @@ export function QualityPicker({
       <button
         type="button"
         className="quality-picker-trigger"
-        data-tooltip={t("picker.qualityDefaultAuto")}
+        data-tooltip={t(selected ? "picker.quality.tooltip" : "picker.qualityDefaultAuto")}
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
@@ -253,13 +319,13 @@ export function QualityPicker({
               aria-selected={option.value === value}
               className={value && option.value === value ? "active" : ""}
               onClick={() => {
-                onChange(option.value === value ? "" : option.value);
+                onChange(option.value === value ? "auto" : option.value);
                 setOpen(false);
               }}
             >
               <span className="quality-option-copy">
                 <strong>{qualityOptionLabel(option, t)}</strong>
-                <small>{qualityOptionDescription(option, t)}</small>
+                <small>{option.value} · {qualityOptionDescription(option, t)}</small>
               </span>
               {option.value === value ? <Check className="size-option-check" size={16} /> : <span />}
             </button>

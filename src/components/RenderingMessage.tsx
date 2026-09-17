@@ -1,8 +1,9 @@
-import { RefreshCw } from "lucide-react";
+import { ArrowLeft, RefreshCw } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import { cx } from "../lib/cx";
 import { RENDERING_MOTION_PAUSE_EVENT, getRenderingMotionPauseUntil } from "../lib/renderingMotion";
+import { RenderingSnakeGame } from "./RenderingSnakeGame";
 
 type RenderingMode = "generation" | "edit";
 
@@ -28,176 +29,91 @@ const EDIT_LOADING_TITLE_KEYS = [
   "rendering.edit.finishing"
 ];
 
-const RENDERING_DOT_COUNT = 15;
+const RENDERING_DOT_COUNT = 35;
 const RENDERING_FRAME_INTERVAL_MS = 1000 / 30;
 const RENDERING_CANVAS_MAX_DPR = 1.5;
-const RENDERING_DOT_LAYER_INSET = 0.03;
-const RENDERING_DOT_LAYER_SCALE = 1.14;
-const RENDERING_DOT_FILL_SCALE = 0.82;
-const RENDERING_DOT_IDLE_SCALE = 0.64;
-const RENDERING_DOT_FOCUS_SCALE_LIFT = 1.14;
-const RENDERING_DOT_CENTER = (RENDERING_DOT_COUNT - 1) / 2;
-const RENDERING_DOTS = Array.from({ length: RENDERING_DOT_COUNT * RENDERING_DOT_COUNT }, (_, index) => {
-  const row = Math.floor(index / RENDERING_DOT_COUNT);
-  const col = index % RENDERING_DOT_COUNT;
-  const distance = Math.hypot(row - RENDERING_DOT_CENTER, col - RENDERING_DOT_CENTER);
-  const centerWeight = Math.max(0, 1 - distance / 8.8);
-  const centerCurve = centerWeight * centerWeight * (3 - 2 * centerWeight);
-  const edgeProgress = Math.max(0.42, Math.min(1, 1 - (distance - 7.2) / 3.2));
-  const edgeCurve = edgeProgress * edgeProgress * (3 - 2 * edgeProgress);
-  const ring = Math.min(7, Math.round(distance));
-  return {
-    id: index,
-    x: (col / (RENDERING_DOT_COUNT - 1)) * 100,
-    y: (row / (RENDERING_DOT_COUNT - 1)) * 100,
-    ring,
-    centerCurve,
-    edgeCurve,
-    size: 5,
-    opacity: (0.2 + centerCurve * 0.66) * edgeCurve
-  };
-});
-
-type RenderingFocusSpot = {
-  x: number;
-  y: number;
-  size: number;
-  opacity: number;
-  duration: number;
-  pulse: number;
-  phaseOffset: number;
-};
-
-type RenderingFocusState = {
-  a: RenderingFocusSpot;
-  b: RenderingFocusSpot;
-};
-
-type RenderingDotVisual = {
-  opacity: number;
-  scale: number;
-  tone: number;
-};
-
-type RenderingRgb = [number, number, number];
-
-const randomBetween = (min: number, max: number) => min + Math.random() * (max - min);
-const randomInteger = (min: number, max: number) => Math.round(randomBetween(min, max));
-const clampMotionPercent = (value: number) => Math.max(-6, Math.min(106, value));
-const createMotionPulse = (now: number, spot: RenderingFocusSpot) => {
-  const period = Math.max(1, spot.duration);
-  const wave = 0.5 - Math.cos((now / period) * Math.PI * 2 + spot.phaseOffset) * 0.5;
-  return smoothStep(wave);
-};
-const createMotionSpeed = (pulse: number) => 0.28 + smoothStep(Math.sin(pulse * Math.PI)) * 0.72;
-const createMotionPace = (pulse: number) => 1 + Math.sin(pulse * Math.PI) * 0.42;
-
-const createRandomFocusSize = () => {
-  const mode = Math.random();
-  if (mode < 0.34) return randomInteger(56, 68);
-  if (mode < 0.82) return randomInteger(68, 84);
-  return randomInteger(84, 96);
-};
-
-const createRandomFocusPosition = () => {
-  const mode = Math.random();
-  if (mode < 0.34) {
-    const side = randomInteger(0, 3);
-    const alongEdge = randomBetween(-2, 102);
-    const edgeBand = randomBetween(5, 20);
-    if (side === 0) return { x: alongEdge, y: edgeBand };
-    if (side === 1) return { x: 100 - edgeBand, y: alongEdge };
-    if (side === 2) return { x: alongEdge, y: 100 - edgeBand };
-    return { x: edgeBand, y: alongEdge };
-  }
-  return {
-    x: randomBetween(-2, 102),
-    y: randomBetween(-2, 102)
-  };
-};
-
-const createRandomFocusSpot = (avoid?: RenderingFocusSpot, minDistance = 38): RenderingFocusSpot => {
-  let candidate: RenderingFocusSpot | null = null;
-  for (let index = 0; index < 8; index += 1) {
-    const position = createRandomFocusPosition();
-    candidate = {
-      x: position.x,
-      y: position.y,
-      size: createRandomFocusSize(),
-      opacity: randomBetween(0.58, 0.86),
-      duration: randomInteger(3200, 5600),
-      pulse: 0.5,
-      phaseOffset: randomBetween(0, Math.PI * 2)
-    };
-    if (!avoid || Math.hypot(candidate.x - avoid.x, candidate.y - avoid.y) >= minDistance) break;
-  }
-  const fallbackPosition = createRandomFocusPosition();
-  return candidate ?? {
-    x: fallbackPosition.x,
-    y: fallbackPosition.y,
-    size: createRandomFocusSize(),
-    opacity: randomBetween(0.58, 0.86),
-    duration: randomInteger(3200, 5600),
-    pulse: 0.5,
-    phaseOffset: randomBetween(0, Math.PI * 2)
-  };
-};
-
-const createInitialFocusState = (): RenderingFocusState => {
-  const a = createRandomFocusSpot();
-  return {
-    a,
-    b: createRandomFocusSpot(a, 46)
-  };
-};
-
+const RENDERING_DOT_LAYER_INSET_X = 0.008;
+const RENDERING_DOT_LAYER_INSET_Y = 0.008;
+const RENDERING_DOT_STATIC_ELAPSED_MS = 9000;
+const RENDERING_LIFEFORM_SPEED = 4.2;
+const RENDERING_DOT_OPACITY_BUCKET_COUNT = 24;
+const RENDERING_GAUSSIAN_LOOKUP_SIZE = 256;
+const RENDERING_GAUSSIAN_MAX_DISTANCE = 8;
+const renderingGaussianLookup = Array.from(
+  { length: RENDERING_GAUSSIAN_LOOKUP_SIZE },
+  (_, index) => Math.exp(-(index / (RENDERING_GAUSSIAN_LOOKUP_SIZE - 1)) * RENDERING_GAUSSIAN_MAX_DISTANCE)
+);
+const renderingDotBuckets = Array.from({ length: RENDERING_DOT_OPACITY_BUCKET_COUNT }, () => [] as number[]);
 const smoothStep = (value: number) => {
   const clamped = Math.max(0, Math.min(1, value));
   return clamped * clamped * (3 - 2 * clamped);
 };
-
-const addWithOverlapLift = (a: number, b: number, cap = 3) => Math.min(cap, a + b + Math.min(a, b));
-
-const getFocusWave = (dot: (typeof RENDERING_DOTS)[number], focus: RenderingFocusSpot) => {
-  const centerX = focus.x;
-  const centerY = focus.y;
-  const radius = Math.max(1, focus.size / 2);
-  const distance = Math.hypot(dot.x - centerX, dot.y - centerY);
-  const radial = Math.max(0, distance / radius);
-  const clampedRadial = Math.min(1, radial);
-  const mask = radial <= 0.48 ? 1 : smoothStep(1 - (radial - 0.48) / 0.64);
-  const center = smoothStep(1 - clampedRadial / 0.96) * mask;
-  const rim = smoothStep(1 - Math.abs(clampedRadial - 0.76) / 0.34) * mask * 0.22;
+const RENDERING_DOTS = Array.from({ length: RENDERING_DOT_COUNT * RENDERING_DOT_COUNT }, (_, index) => {
+  const row = Math.floor(index / RENDERING_DOT_COUNT);
+  const col = index % RENDERING_DOT_COUNT;
+  const x = col / (RENDERING_DOT_COUNT - 1);
+  const y = row / (RENDERING_DOT_COUNT - 1);
+  const edgeDistance = Math.min(x, y, 1 - x, 1 - y);
   return {
-    center,
-    mask,
-    value: mask * focus.opacity,
-    pulse: focus.pulse,
-    speed: createMotionSpeed(focus.pulse),
-    radial: clampedRadial,
-    rim
+    x,
+    y,
+    edgeFade: 0.82 + smoothStep(edgeDistance / 0.16) * 0.18
   };
+});
+
+type RenderingRgb = [number, number, number];
+type RenderingLifeform = {
+  x: number;
+  y: number;
+  radius: number;
+  scaleX: number;
+  scaleY: number;
+  cosTilt: number;
+  sinTilt: number;
 };
 
-const getDotVisual = (dot: (typeof RENDERING_DOTS)[number], focusState: RenderingFocusState): RenderingDotVisual => {
-  const waveA = getFocusWave(dot, focusState.a);
-  const waveB = getFocusWave(dot, focusState.b);
-  const focusCircle = Math.min(1, waveA.mask + waveB.mask);
-  const centerBulge = addWithOverlapLift(waveA.center, waveB.center);
-  const circularRim = addWithOverlapLift(waveA.rim, waveB.rim) * focusCircle;
-  const focusEnergy = addWithOverlapLift(waveA.value, waveB.value);
-  const motionEnergy = addWithOverlapLift(waveA.speed * waveA.mask, waveB.speed * waveB.mask);
-  const mergeMask = smoothStep((Math.min(waveA.mask, waveB.mask) - 0.18) / 0.82);
-  const mergeCore = smoothStep((Math.min(waveA.center, waveB.center) - 0.04) / 0.96);
-  const scale = RENDERING_DOT_IDLE_SCALE + mergeMask * RENDERING_DOT_FOCUS_SCALE_LIFT + mergeCore * 0.36;
-  const activeOpacity = 0.44 + focusCircle * 0.08 + Math.min(1.6, centerBulge) * 0.14 + motionEnergy * 0.1;
-  const opacity = Math.min(0.96, activeOpacity * Math.pow(focusCircle, 1.22));
-  const tone = Math.round(188 - Math.min(1, focusEnergy * 0.48 + motionEnergy * 0.42 + circularRim * 0.1) * 38);
-  return {
-    opacity,
-    scale,
-    tone
-  };
+const clampRatio = (value: number) => Math.max(0.06, Math.min(0.94, value));
+
+const renderingLifeformsAt = (elapsedMs: number): [RenderingLifeform, RenderingLifeform] => {
+  const time = (elapsedMs / 1000) * RENDERING_LIFEFORM_SPEED;
+  const tiltA = Math.sin(time * 0.17) * 0.38;
+  const tiltB = Math.cos(time * 0.19 + 0.8) * 0.34;
+  return [
+    {
+      x: clampRatio(0.52 + Math.sin(time * 0.27) * 0.18 + Math.sin(time * 0.61 + 0.4) * 0.04),
+      y: clampRatio(0.3 + Math.cos(time * 0.23 + 1.9) * 0.14 + Math.sin(time * 0.43 + 0.3) * 0.035),
+      radius: 0.3 + Math.sin(time * 0.39) * 0.025,
+      scaleX: 1.08 + Math.sin(time * 0.31 + 0.2) * 0.08,
+      scaleY: 0.94 + Math.cos(time * 0.29 + 0.6) * 0.06,
+      cosTilt: Math.cos(tiltA),
+      sinTilt: Math.sin(tiltA)
+    },
+    {
+      x: clampRatio(0.46 + Math.cos(time * 0.25 + 1.2) * 0.18 + Math.sin(time * 0.53) * 0.04),
+      y: clampRatio(0.7 + Math.sin(time * 0.29 + 0.4) * 0.14 + Math.cos(time * 0.47 + 1.2) * 0.035),
+      radius: 0.31 + Math.cos(time * 0.37 + 0.7) * 0.025,
+      scaleX: 0.95 + Math.cos(time * 0.27 + 0.9) * 0.06,
+      scaleY: 1.09 + Math.sin(time * 0.33 + 0.5) * 0.08,
+      cosTilt: Math.cos(tiltB),
+      sinTilt: Math.sin(tiltB)
+    }
+  ];
+};
+
+const lifeformInfluence = (x: number, y: number, lifeform: RenderingLifeform) => {
+  const dx = x - lifeform.x;
+  const dy = y - lifeform.y;
+  const inverseRadius = 1 / Math.max(0.01, lifeform.radius);
+  const rotatedX = (dx * lifeform.cosTilt + dy * lifeform.sinTilt) / lifeform.scaleX;
+  const rotatedY = (-dx * lifeform.sinTilt + dy * lifeform.cosTilt) / lifeform.scaleY;
+  const scaledDistance = Math.min(
+    RENDERING_GAUSSIAN_MAX_DISTANCE,
+    (rotatedX * rotatedX + rotatedY * rotatedY) * inverseRadius * inverseRadius * 1.2
+  );
+  const lookupIndex = Math.round(
+    (scaledDistance / RENDERING_GAUSSIAN_MAX_DISTANCE) * (RENDERING_GAUSSIAN_LOOKUP_SIZE - 1)
+  );
+  return renderingGaussianLookup[lookupIndex];
 };
 
 const readRenderingThemeRgb = (element: HTMLElement): RenderingRgb | null => {
@@ -213,33 +129,49 @@ const drawRenderingDots = (
   context: CanvasRenderingContext2D,
   width: number,
   height: number,
-  focusState: RenderingFocusState,
+  elapsedMs: number,
   themeRgb: RenderingRgb | null
 ) => {
   context.clearRect(0, 0, width, height);
-  const innerWidth = width * (1 - RENDERING_DOT_LAYER_INSET * 2);
-  const innerHeight = height * (1 - RENDERING_DOT_LAYER_INSET * 2);
-  const cellWidth = innerWidth / RENDERING_DOT_COUNT;
-  const cellHeight = innerHeight / RENDERING_DOT_COUNT;
-  const centerX = width / 2;
-  const centerY = height / 2;
+  const innerWidth = width * (1 - RENDERING_DOT_LAYER_INSET_X * 2);
+  const innerHeight = height * (1 - RENDERING_DOT_LAYER_INSET_Y * 2);
+  const cellWidth = innerWidth / (RENDERING_DOT_COUNT - 1);
+  const cellHeight = innerHeight / (RENDERING_DOT_COUNT - 1);
+  const cellSize = Math.min(cellWidth, cellHeight);
+  const time = Math.max(0, elapsedMs);
+  const [lifeformA, lifeformB] = renderingLifeformsAt(time);
+  const rgb = themeRgb ?? [75, 139, 246];
+  renderingDotBuckets.forEach((bucket) => { bucket.length = 0; });
 
   for (const dot of RENDERING_DOTS) {
-    const row = Math.floor(dot.id / RENDERING_DOT_COUNT);
-    const col = dot.id % RENDERING_DOT_COUNT;
-    const gridX = width * RENDERING_DOT_LAYER_INSET + (col + 0.5) * cellWidth;
-    const gridY = height * RENDERING_DOT_LAYER_INSET + (row + 0.5) * cellHeight;
-    const x = centerX + (gridX - centerX) * RENDERING_DOT_LAYER_SCALE;
-    const y = centerY + (gridY - centerY) * RENDERING_DOT_LAYER_SCALE;
-    const visual = getDotVisual(dot, focusState);
-    const radius = (dot.size * visual.scale * RENDERING_DOT_LAYER_SCALE * RENDERING_DOT_FILL_SCALE) / 2;
-    const rgb = themeRgb ?? [visual.tone, visual.tone, visual.tone];
-
-    context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fillStyle = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${visual.opacity})`;
-    context.fill();
+    const x = width * RENDERING_DOT_LAYER_INSET_X + dot.x * innerWidth;
+    const y = height * RENDERING_DOT_LAYER_INSET_Y + dot.y * innerHeight;
+    const influenceA = lifeformInfluence(dot.x, dot.y, lifeformA);
+    const influenceB = lifeformInfluence(dot.x, dot.y, lifeformB);
+    const lifeEnergy = 1 - (1 - influenceA) * (1 - influenceB);
+    const radius = cellSize * (0.055 + lifeEnergy * 0.155);
+    const opacity = Math.min(0.94, (0.18 + lifeEnergy * 0.76) * dot.edgeFade);
+    const bucketIndex = Math.min(
+      RENDERING_DOT_OPACITY_BUCKET_COUNT - 1,
+      Math.max(0, Math.round((opacity / 0.94) * (RENDERING_DOT_OPACITY_BUCKET_COUNT - 1)))
+    );
+    renderingDotBuckets[bucketIndex].push(x, y, radius);
   }
+
+  renderingDotBuckets.forEach((bucket, bucketIndex) => {
+    if (bucket.length === 0) return;
+    context.beginPath();
+    for (let index = 0; index < bucket.length; index += 3) {
+      const x = bucket[index];
+      const y = bucket[index + 1];
+      const radius = bucket[index + 2];
+      context.moveTo(x + radius, y);
+      context.arc(x, y, radius, 0, Math.PI * 2);
+    }
+    const opacity = (bucketIndex / (RENDERING_DOT_OPACITY_BUCKET_COUNT - 1)) * 0.94;
+    context.fillStyle = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${opacity})`;
+    context.fill();
+  });
 };
 
 export const RenderingMessage = memo(function RenderingMessage({
@@ -254,22 +186,18 @@ export const RenderingMessage = memo(function RenderingMessage({
     () => (mode === "edit" ? EDIT_LOADING_TITLE_KEYS : GENERATION_LOADING_TITLE_KEYS).map((key) => t(key)),
     [mode, t]
   );
-  const [renderSeed] = useState(() => Math.floor(Math.random() * 100000));
   const [titleIndex, setTitleIndex] = useState(0);
   const [titleSettled, setTitleSettled] = useState(true);
+  const [snakeActive, setSnakeActive] = useState(false);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const animationElapsedRef = useRef(0);
   const motionPauseUntilRef = useRef(getRenderingMotionPauseUntil());
-  const focusMotionRef = useRef<{
-    current: RenderingFocusState;
-    target: RenderingFocusState;
-    lastFrameAt: number;
-    retargetAt: {
-      a: number;
-      b: number;
-    };
-  } | null>(null);
-  const variant = renderSeed % 3;
+
+  useEffect(() => {
+    animationElapsedRef.current = 0;
+    setSnakeActive(false);
+  }, [mode]);
 
   useEffect(() => {
     setTitleIndex(0);
@@ -298,6 +226,7 @@ export const RenderingMessage = memo(function RenderingMessage({
   }, [mode, titles.length]);
 
   useEffect(() => {
+    if (snakeActive) return undefined;
     const card = cardRef.current;
     const canvas = canvasRef.current;
     if (!card || !canvas) return undefined;
@@ -314,22 +243,27 @@ export const RenderingMessage = memo(function RenderingMessage({
     let themeRgb = readRenderingThemeRgb(card);
     const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
     let prefersReducedMotion = reducedMotionQuery.matches;
-    const now = performance.now();
-    const initial = createInitialFocusState();
-    focusMotionRef.current = {
-      current: initial,
-      target: {
-        a: createRandomFocusSpot(initial.b, 42),
-        b: createRandomFocusSpot(initial.a, 42)
-      },
-      lastFrameAt: now,
-      retargetAt: {
-        a: now + randomInteger(3800, 6200),
-        b: now + randomInteger(3800, 6200)
-      }
+    let animationClockStartedAt = performance.now();
+    let animationClockRunning = false;
+    let lastFrameAt = animationClockStartedAt;
+
+    const currentAnimationElapsed = (now = performance.now()) => (
+      animationElapsedRef.current
+      + (animationClockRunning ? Math.max(0, now - animationClockStartedAt) : 0)
+    );
+
+    const stopAnimationClock = (now = performance.now()) => {
+      if (!animationClockRunning) return;
+      animationElapsedRef.current = currentAnimationElapsed(now);
+      animationClockRunning = false;
     };
 
-    const paint = (state: RenderingFocusState) => {
+    const startAnimationClock = (now = performance.now()) => {
+      animationClockStartedAt = now;
+      animationClockRunning = true;
+    };
+
+    const paint = (elapsedMs = currentAnimationElapsed()) => {
       const rect = canvas.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return;
       const dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), RENDERING_CANVAS_MAX_DPR);
@@ -343,7 +277,13 @@ export const RenderingMessage = memo(function RenderingMessage({
         canvas.height = nextHeight;
       }
       context.setTransform(dpr, 0, 0, dpr, 0, 0);
-      drawRenderingDots(context, rect.width, rect.height, state, themeRgb);
+      drawRenderingDots(
+        context,
+        rect.width,
+        rect.height,
+        prefersReducedMotion ? RENDERING_DOT_STATIC_ELAPSED_MS : elapsedMs,
+        themeRgb
+      );
     };
 
     const stopLoop = () => {
@@ -366,109 +306,42 @@ export const RenderingMessage = memo(function RenderingMessage({
       if (!mounted) return;
       stopLoop();
       window.clearTimeout(resumeTimer);
-      const motion = focusMotionRef.current;
-      if (!motion) return;
+      const currentTime = performance.now();
+      stopAnimationClock(currentTime);
       prefersReducedMotion = reducedMotionQuery.matches;
       if (prefersReducedMotion) {
-        paint(motion.current);
+        paint(RENDERING_DOT_STATIC_ELAPSED_MS);
         return;
       }
       if (!isIntersecting || document.visibilityState === "hidden") return;
-      const currentTime = performance.now();
       if (currentTime < motionPauseUntilRef.current) {
         scheduleResume(motionPauseUntilRef.current);
         return;
       }
-      motion.lastFrameAt = currentTime;
+      startAnimationClock(currentTime);
+      lastFrameAt = currentTime;
       scheduleLoop();
     }
 
-    const updateSpot = (
-      current: RenderingFocusSpot,
-      target: RenderingFocusSpot,
-      deltaMs: number,
-      nowMs: number,
-      avoid?: RenderingFocusSpot
-    ) => {
-      const dx = target.x - current.x;
-      const dy = target.y - current.y;
-      const distance = Math.hypot(current.x - target.x, current.y - target.y);
-      const pulse = createMotionPulse(nowMs, current);
-      if (distance < 9) {
-        return {
-          current: {
-            ...current,
-            pulse
-          },
-          target: createRandomFocusSpot(avoid, 38)
-        };
-      }
-      const pace = createMotionPace(pulse);
-      const progress = 1 - Math.exp((-deltaMs * pace) / (target.duration * 0.34));
-      return {
-        current: {
-          x: clampMotionPercent(current.x + dx * progress),
-          y: clampMotionPercent(current.y + dy * progress),
-          size: current.size + (target.size - current.size) * progress,
-          opacity: current.opacity + (target.opacity - current.opacity) * progress,
-          duration: target.duration,
-          pulse,
-          phaseOffset: current.phaseOffset
-        },
-        target
-      };
-    };
-
     function tick(now: number) {
       animationFrame = 0;
-      const motion = focusMotionRef.current;
-      if (!mounted || !motion) return;
+      if (!mounted) return;
       prefersReducedMotion = reducedMotionQuery.matches;
       if (prefersReducedMotion || !isIntersecting || document.visibilityState === "hidden") {
         wake();
         return;
       }
       if (now < motionPauseUntilRef.current) {
-        motion.lastFrameAt = now;
-        scheduleResume(motionPauseUntilRef.current);
+        wake();
         return;
       }
-      const elapsed = now - motion.lastFrameAt;
+      const elapsed = now - lastFrameAt;
       if (elapsed < RENDERING_FRAME_INTERVAL_MS) {
         scheduleLoop();
         return;
       }
-      const deltaMs = Math.min(80, Math.max(16, elapsed));
-      motion.lastFrameAt = now;
-      if (now >= motion.retargetAt.a) {
-        motion.target.a = createRandomFocusSpot(motion.current.b, 38);
-        motion.retargetAt.a = now + randomInteger(3800, 6200);
-      }
-      if (now >= motion.retargetAt.b) {
-        motion.target.b = createRandomFocusSpot(motion.current.a, 38);
-        motion.retargetAt.b = now + randomInteger(3800, 6200);
-      }
-      const previousTargetA = motion.target.a;
-      const previousTargetB = motion.target.b;
-      const nextA = updateSpot(motion.current.a, previousTargetA, deltaMs, now, motion.current.b);
-      const nextB = updateSpot(motion.current.b, previousTargetB, deltaMs, now, motion.current.a);
-      const aReachedTarget = nextA.target !== previousTargetA;
-      const bReachedTarget = nextB.target !== previousTargetB;
-      motion.current = {
-        a: nextA.current,
-        b: nextB.current
-      };
-      motion.target = {
-        a: nextA.target,
-        b: nextB.target
-      };
-      if (aReachedTarget) {
-        motion.retargetAt.a = now + randomInteger(3800, 6200);
-      }
-      if (bReachedTarget) {
-        motion.retargetAt.b = now + randomInteger(3800, 6200);
-      }
-      paint(motion.current);
+      lastFrameAt = now;
+      paint(currentAnimationElapsed(now));
       scheduleLoop();
     }
 
@@ -485,8 +358,7 @@ export const RenderingMessage = memo(function RenderingMessage({
     };
     const refreshTheme = () => {
       themeRgb = readRenderingThemeRgb(card);
-      const motion = focusMotionRef.current;
-      if (motion) paint(motion.current);
+      paint();
     };
 
     const intersectionObserver = new IntersectionObserver((entries) => {
@@ -496,8 +368,7 @@ export const RenderingMessage = memo(function RenderingMessage({
     intersectionObserver.observe(card);
 
     const resizeObserver = new ResizeObserver(() => {
-      const motion = focusMotionRef.current;
-      if (motion && isIntersecting) paint(motion.current);
+      if (isIntersecting) paint();
     });
     resizeObserver.observe(card);
 
@@ -511,10 +382,11 @@ export const RenderingMessage = memo(function RenderingMessage({
     document.addEventListener("visibilitychange", handleVisibilityChange);
     reducedMotionQuery.addEventListener("change", handleReducedMotionChange);
 
-    paint(initial);
+    paint(animationElapsedRef.current);
     wake();
     return () => {
       mounted = false;
+      stopAnimationClock();
       stopLoop();
       window.clearTimeout(resumeTimer);
       intersectionObserver.disconnect();
@@ -524,22 +396,46 @@ export const RenderingMessage = memo(function RenderingMessage({
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       reducedMotionQuery.removeEventListener("change", handleReducedMotionChange);
     };
-  }, [mode]);
+  }, [mode, snakeActive]);
 
   const title = (
     <span
-      key={`${mode}-${titleIndex}`}
-      className={cx("rendering-title", titleSettled && "settled")}
+      key={`${mode}-${titleIndex}-${snakeActive ? "game" : "loading"}`}
+      className={cx("rendering-title", snakeActive && "game-help", titleSettled && "settled")}
       aria-live={imageGroupLayout ? "polite" : undefined}
     >
-        {titles[titleIndex] ?? titles[0]}
+        {snakeActive ? (
+          <>
+            <button
+              type="button"
+              className="rendering-game-back"
+              onClick={() => setSnakeActive(false)}
+              aria-label={t("rendering.snake.backToLoading")}
+            >
+              <ArrowLeft size={16} />
+            </button>
+            <span>{t("rendering.snake.shortInstructions")}</span>
+          </>
+        ) : titles[titleIndex] ?? titles[0]}
     </span>
   );
   const card = (
-    <div ref={cardRef} className={`rendering-card rendering-card-variant-${variant}`}>
-        <div className="rendering-dot-field" aria-hidden="true">
-          <canvas ref={canvasRef} className="rendering-dot-canvas" />
-        </div>
+    <div ref={cardRef} className={cx("rendering-card", snakeActive && "is-snake-active")}>
+      {snakeActive ? (
+        <RenderingSnakeGame t={t} onExit={() => setSnakeActive(false)} />
+      ) : (
+        <>
+          <div className="rendering-dot-field" aria-hidden="true">
+            <canvas ref={canvasRef} className="rendering-dot-canvas" />
+          </div>
+          <button
+            type="button"
+            className="rendering-game-start"
+            aria-label={t("rendering.playSnake")}
+            onClick={() => setSnakeActive(true)}
+          />
+        </>
+      )}
     </div>
   );
 

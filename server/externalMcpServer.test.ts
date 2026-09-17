@@ -4,7 +4,9 @@ import {
   DEVICE_REPORT_REQUIRED_MESSAGE,
   EXTERNAL_MCP_IMAGE_BACKGROUND_SCHEMA,
   EXTERNAL_MCP_IMAGE_COUNT_SCHEMA,
+  EXTERNAL_MCP_IMAGE_MODEL_SCHEMA,
   EXTERNAL_MCP_IMAGE_OUTPUT_FORMAT_SCHEMA,
+  EXTERNAL_MCP_IMAGE_QUALITY_SCHEMA,
   externalMcpInternalApiUrl
 } from "./externalMcpServer";
 
@@ -43,6 +45,16 @@ describe("external MCP internal image requests", () => {
     expect(EXTERNAL_MCP_IMAGE_OUTPUT_FORMAT_SCHEMA.safeParse("png").success).toBe(true);
     expect(EXTERNAL_MCP_IMAGE_OUTPUT_FORMAT_SCHEMA.safeParse("webp").success).toBe(true);
     expect(EXTERNAL_MCP_IMAGE_OUTPUT_FORMAT_SCHEMA.safeParse("jpeg").success).toBe(false);
+  });
+
+  test("exposes GPT Image 2.5 model and quality choices", () => {
+    expect(EXTERNAL_MCP_IMAGE_MODEL_SCHEMA.safeParse("gpt-image-2.5-flare").success).toBe(true);
+    expect(EXTERNAL_MCP_IMAGE_MODEL_SCHEMA.safeParse("gpt-image-2.5-sunburst").success).toBe(true);
+    expect(EXTERNAL_MCP_IMAGE_MODEL_SCHEMA.safeParse("gpt-image-2").success).toBe(true);
+    expect(EXTERNAL_MCP_IMAGE_MODEL_SCHEMA.safeParse("gpt-image-2.5").success).toBe(false);
+    expect(EXTERNAL_MCP_IMAGE_QUALITY_SCHEMA.safeParse("auto").success).toBe(true);
+    expect(EXTERNAL_MCP_IMAGE_QUALITY_SCHEMA.safeParse("xhigh").success).toBe(true);
+    expect(EXTERNAL_MCP_IMAGE_QUALITY_SCHEMA.safeParse("max").success).toBe(true);
   });
 
   test("returns a compact resource link without base64 image data for a completed job", async () => {

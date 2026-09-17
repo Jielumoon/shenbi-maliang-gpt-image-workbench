@@ -34,6 +34,13 @@ export function brushSizeRatioFromDisplayPixels(size: number, width: number, hei
   return shortestSide > 0 ? Math.max(4, size) / shortestSide : 0;
 }
 
+export function centeredBrushCursorOffset(offsetX: number, offsetY: number, size: number) {
+  return {
+    x: offsetX - size / 2,
+    y: offsetY - size / 2
+  };
+}
+
 export function selectionPreviewCanvasSize(
   displayWidth: number,
   displayHeight: number,

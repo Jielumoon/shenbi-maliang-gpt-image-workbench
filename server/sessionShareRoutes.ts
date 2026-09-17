@@ -385,6 +385,20 @@ type SharedBranchMetadataScope = {
   messageId: (value: string) => string;
 };
 
+const SHARED_DISPLAY_METADATA_KEYS = [
+  "model",
+  "requestedModel",
+  "actualModel",
+  "actualLanguageModel",
+  "requestedQuality",
+  "actualQuality"
+] as const;
+
+function safeSharedDisplayMetadataText(value: unknown) {
+  if (typeof value !== "string") return "";
+  return value.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 160);
+}
+
 export function safeSharedMessageMetadata(
   value: string | null | Record<string, unknown>,
   localJobId = "",
@@ -396,6 +410,10 @@ export function safeSharedMessageMetadata(
   if (mode === "generation" || mode === "edit") metadata.mode = mode;
   if (localJobId) metadata.jobId = localJobId;
   if (raw.hideReference === true) metadata.hideReference = true;
+  for (const key of SHARED_DISPLAY_METADATA_KEYS) {
+    const text = safeSharedDisplayMetadataText(raw[key]);
+    if (text) metadata[key] = text;
+  }
   if (branchScope) {
     for (const key of ["branchId", "parentBranchId"] as const) {
       const localId = branchScope.branchId(String(raw[key] ?? "").trim());

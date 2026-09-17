@@ -1,6 +1,8 @@
 export const IMAGE_BACKGROUND_OPTIONS = ["auto", "opaque", "transparent"] as const;
 export const TRANSPARENT_IMAGE_OUTPUT_FORMAT = "png" as const;
 export const INHERITED_SOURCE_BACKGROUND_REQUEST_KEY = "_inheritedSourceBackground" as const;
+export const REMOVE_IMAGE_BACKGROUND_PROMPT =
+  "移除此图像的背景。保持所有前景主体不变且完整无损，边缘干净平滑。将背景设为透明。";
 
 export type ImageBackgroundOption = (typeof IMAGE_BACKGROUND_OPTIONS)[number];
 export type TransparentImageOutputFormat = "png" | "webp";

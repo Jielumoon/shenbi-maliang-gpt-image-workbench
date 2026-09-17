@@ -20,6 +20,8 @@ import {
   resolveChatGptWebImageQuotaOrder
 } from "./chatGptWebImageRequest";
 import { INHERITED_SOURCE_BACKGROUND_REQUEST_KEY, injectImageBackgroundInstruction } from "../src/lib/imageBackground";
+import { DRAWING_REFERENCE_REQUEST_KEY } from "../src/lib/drawingReference";
+import { isImageModelId } from "../src/lib/imageModels";
 import { configDb, getAll, getOne, run } from "./db";
 import { readImageDimensions } from "./imageDimensions";
 import { ROOT } from "./paths";
@@ -1105,7 +1107,7 @@ function imageModelBaseName(model: unknown) {
 
 function isGptImage2Family(model: unknown) {
   const base = imageModelBaseName(model);
-  return base === "gpt-image-2" || base === "codex-gpt-image-2" || base.startsWith("gpt-image-2-");
+  return base === "codex-gpt-image-2" || /^gpt-image-2(?:$|[.-])/.test(base);
 }
 
 function buildResponsesPayload(
@@ -1131,7 +1133,7 @@ function buildResponsesPayload(
   const tool: Record<string, unknown> = {
     type: "image_generation",
     action: mode === "edit" ? "edit" : "generate",
-    model: provider.model || "gpt-image-2",
+    model: String(payload.model ?? provider.model ?? "").trim() || DEFAULT_IMAGE_MODEL,
     output_format: String(payload.output_format ?? "").trim() || "png"
   };
   if (payload.size) tool.size = String(payload.size);
@@ -1617,10 +1619,13 @@ async function callImagesApiProvider(
     provider.base_url,
     mode === "generation" ? provider.generation_path : provider.edit_path
   );
-  if (mode === "edit") {
-    return executeProviderFormRequest(provider, mode, "images_api", endpoint, buildImageEditForm(payload), context);
-  }
-  return executeProviderJsonRequest(provider, mode, "images_api", endpoint, payload, "application/json", context);
+  const responseJson = mode === "edit"
+    ? await executeProviderFormRequest(provider, mode, "images_api", endpoint, buildImageEditForm(payload), context)
+    : await executeProviderJsonRequest(provider, mode, "images_api", endpoint, payload, "application/json", context);
+  return attachProviderRouteExecution(responseJson, {
+    actualLanguageModel: "",
+    actualRouteMode: "images_api"
+  });
 }
 
 async function callResponsesProvider(
@@ -1632,15 +1637,20 @@ async function callResponsesProvider(
   context: ProviderRequestContext = {}
 ) {
   const endpoint = normalizePath(provider.base_url, provider.responses_path || "/v1/responses");
-  return executeProviderJsonRequest(
+  const actualLanguageModel = resolveResponsesModel(provider, responsesModel);
+  const responseJson = await executeProviderJsonRequest(
     provider,
     mode,
     "responses",
     endpoint,
-    buildResponsesPayload(provider, mode, payload, stream, responsesModel),
+    buildResponsesPayload(provider, mode, payload, stream, actualLanguageModel),
     stream ? "text/event-stream" : "application/json",
     context
   );
+  return attachProviderRouteExecution(responseJson, {
+    actualLanguageModel,
+    actualRouteMode: "responses"
+  });
 }
 
 function shouldFallbackToResponses(provider: ProviderRow, hasMask: boolean, error: unknown) {
@@ -2232,6 +2242,66 @@ function attachSourceAccountContext(responseJson: unknown, sourceAccountId: stri
   return next;
 }
 
+export type ProviderImageExecution = {
+  requestedModel: string;
+  actualModel: string;
+  actualLanguageModel: string;
+  actualRouteMode: string;
+  requestedQuality: string;
+  actualQuality: string;
+  modelFallbackReason: string;
+};
+
+const IMAGE_MODEL_EXECUTION_KEY = "image_model_execution";
+const PROVIDER_ROUTE_EXECUTION_KEY = "provider_route_execution";
+
+type ProviderRouteExecution = Pick<ProviderImageExecution, "actualLanguageModel" | "actualRouteMode">;
+
+function attachProviderRouteExecution(responseJson: unknown, execution: ProviderRouteExecution): unknown {
+  if (!responseJson || typeof responseJson !== "object" || Array.isArray(responseJson)) {
+    return { data: responseJson, [PROVIDER_ROUTE_EXECUTION_KEY]: execution };
+  }
+  return {
+    ...(responseJson as Record<string, unknown>),
+    [PROVIDER_ROUTE_EXECUTION_KEY]: execution
+  };
+}
+
+function attachImageModelExecution(responseJson: unknown, execution: ProviderImageExecution): unknown {
+  if (!responseJson || typeof responseJson !== "object" || Array.isArray(responseJson)) {
+    return { data: responseJson, [IMAGE_MODEL_EXECUTION_KEY]: execution };
+  }
+  return {
+    ...(responseJson as Record<string, unknown>),
+    [IMAGE_MODEL_EXECUTION_KEY]: execution
+  };
+}
+
+function providerImageExecution(
+  responseJson: unknown,
+  fallback: ProviderImageExecution
+): ProviderImageExecution {
+  if (!responseJson || typeof responseJson !== "object" || Array.isArray(responseJson)) return fallback;
+  const responseRecord = responseJson as Record<string, unknown>;
+  const value = responseRecord[IMAGE_MODEL_EXECUTION_KEY];
+  const record = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const routeValue = responseRecord[PROVIDER_ROUTE_EXECUTION_KEY];
+  const routeRecord = routeValue && typeof routeValue === "object" && !Array.isArray(routeValue)
+    ? routeValue as Record<string, unknown>
+    : {};
+  return {
+    requestedModel: String(record.requestedModel ?? fallback.requestedModel),
+    actualModel: String(record.actualModel ?? fallback.actualModel),
+    actualLanguageModel: String(record.actualLanguageModel ?? routeRecord.actualLanguageModel ?? fallback.actualLanguageModel),
+    actualRouteMode: String(record.actualRouteMode ?? routeRecord.actualRouteMode ?? fallback.actualRouteMode),
+    requestedQuality: String(record.requestedQuality ?? fallback.requestedQuality),
+    actualQuality: String(record.actualQuality ?? fallback.actualQuality),
+    modelFallbackReason: String(record.modelFallbackReason ?? fallback.modelFallbackReason)
+  };
+}
+
 async function executeStudioJsonRequest(
   provider: RuntimeProviderRow,
   operation: "generation" | "edit",
@@ -2396,7 +2466,7 @@ async function executeChatGptWebBridgeRequest(
         cookies: settings.cookies,
         accountId: settings.accountId,
         sourceAccountId: settings.sourceAccountId,
-        model: provider.model || DEFAULT_IMAGE_MODEL,
+        model: String(payload.model ?? provider.model ?? "").trim() || DEFAULT_IMAGE_MODEL,
         payload,
         proxy: proxy.enabled && proxy.url ? proxy.url : "",
         retryCount: proxy.enabled && proxy.url ? proxy.retryCount : 0
@@ -2646,7 +2716,7 @@ function buildStudioLegacyPrompt(payload: Record<string, unknown>) {
   if (size && size !== "auto" && size !== "1024x1024") {
     prompt = `Generate an image with size ${size}. ${prompt}`;
   }
-  if (quality === "hd" || quality === "high") {
+  if (["hd", "high", "xhigh", "max"].includes(quality)) {
     prompt = `Generate a high-quality, detailed image: ${prompt}`;
   }
   return prompt;
@@ -2663,7 +2733,13 @@ type ChatGptUploadedFile = {
 
 function chatGptWebConversationModel(model: string) {
   const normalized = String(model ?? "").trim();
-  if (!normalized || normalized === DEFAULT_IMAGE_MODEL || normalized === "codex-gpt-image-2") return DEFAULT_RESPONSES_MODEL;
+  if (
+    !normalized
+    || normalized === "gpt-image-2.5-flare"
+    || normalized === "gpt-image-2.5-sunburst"
+    || normalized === "gpt-image-2"
+    || normalized === "codex-gpt-image-2"
+  ) return DEFAULT_RESPONSES_MODEL;
   return normalized;
 }
 
@@ -3137,7 +3213,20 @@ async function callChatGptWebProvider(
     for (const quota of quotaOrder) {
       assertProviderRequestActive(context);
       try {
-        return await callChatGptWebQuotaProvider(provider, mode, payload, quota, lease.settings, context);
+        const responseJson = await callChatGptWebQuotaProvider(provider, mode, payload, quota, lease.settings, context);
+        const requestedModel = String(payload.model ?? provider.model ?? "").trim() || DEFAULT_IMAGE_MODEL;
+        const requestedQuality = String(payload.quality ?? "").trim() || "auto";
+        return attachImageModelExecution(responseJson, {
+          requestedModel,
+          actualModel: quota === "official" ? "chatgpt-web-auto" : requestedModel,
+          actualLanguageModel: quota === "codex" ? resolveResponsesModel(provider) : "",
+          actualRouteMode: quota === "codex" ? "chatgpt_web_codex_responses" : "chatgpt_web_official",
+          requestedQuality,
+          actualQuality: quota === "official" ? "auto" : requestedQuality,
+          modelFallbackReason: quota === "official"
+            ? "ChatGPT 官网普通额度不公开图片模型和质量参数，已由官网自动选择"
+            : ""
+        });
       } catch (error) {
         if (providerRequestWasCancelled(error, context.signal)) throw new ProviderRequestCancelledError();
         errors.push(`${quota === "codex" ? "Codex 额度" : "官网额度"}失败：${error instanceof Error ? error.message : String(error)}`);
@@ -3192,12 +3281,16 @@ export async function callProvider(
 function payloadForProvider(provider: RuntimeProviderRow, payload: Record<string, unknown>) {
   const channel = normalizeProviderChannel(provider.channel || inferChannelFromType(provider.type));
   const hasMask = typeof payload.mask === "string" && payload.mask.trim();
+  const requestedModel = String(payload.model ?? "").trim();
   const nextPayload: Record<string, unknown> = {
     ...payload,
-    model: String(provider.model || "").trim() || DEFAULT_IMAGE_MODEL
+    model: isImageModelId(requestedModel)
+      ? requestedModel
+      : String(provider.model || "").trim() || DEFAULT_IMAGE_MODEL
   };
   const inheritedSourceBackground = nextPayload[INHERITED_SOURCE_BACKGROUND_REQUEST_KEY] === true;
   delete nextPayload[INHERITED_SOURCE_BACKGROUND_REQUEST_KEY];
+  delete nextPayload[DRAWING_REFERENCE_REQUEST_KEY];
   if (isGptImage2Family(nextPayload.model)) {
     delete nextPayload.input_fidelity;
   }
@@ -3220,6 +3313,7 @@ function payloadForProvider(provider: RuntimeProviderRow, payload: Record<string
 type ProviderChainResponseHandler<T> = (input: {
   provider: RuntimeProviderRow;
   responseJson: unknown;
+  execution: ProviderImageExecution;
 }) => Promise<T> | T;
 
 type ProviderConcurrencyWaiter = {
@@ -3335,8 +3429,19 @@ export async function callProviderChain<T = undefined>(
       } finally {
         release();
       }
-      const result = onProviderResponse ? await onProviderResponse({ provider, responseJson }) : undefined;
-      return { provider, responseJson, result };
+      const requestedModel = String(payload.model ?? providerPayload.model ?? "").trim() || DEFAULT_IMAGE_MODEL;
+      const requestedQuality = String(payload.quality ?? providerPayload.quality ?? "").trim() || "auto";
+      const execution = providerImageExecution(responseJson, {
+        requestedModel,
+        actualModel: String(providerPayload.model ?? "").trim() || DEFAULT_IMAGE_MODEL,
+        actualLanguageModel: "",
+        actualRouteMode: "",
+        requestedQuality,
+        actualQuality: String(providerPayload.quality ?? "").trim() || "auto",
+        modelFallbackReason: ""
+      });
+      const result = onProviderResponse ? await onProviderResponse({ provider, responseJson, execution }) : undefined;
+      return { provider, responseJson, result, execution };
     } catch (error) {
       if (providerRequestWasCancelled(error, context.signal)) throw new ProviderRequestCancelledError();
       errors.push(`${provider.name}：${error instanceof Error ? error.message : String(error)}`);

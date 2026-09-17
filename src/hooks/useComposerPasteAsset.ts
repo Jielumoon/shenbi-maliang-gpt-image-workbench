@@ -8,7 +8,20 @@ import type { AssetItem } from "../types";
 type PasteAssetResult = {
   asset: AssetItem;
   uploaded: boolean;
+  origin: ComposerImageOrigin;
+  uploadFallback?: boolean;
 };
+
+export type ComposerImageOrigin = "pasted" | "drawing";
+type AddComposerImageOptions = {
+  replaceAssetId?: string;
+};
+type ComposerImageMutationInput = AddComposerImageOptions & {
+  file: File;
+  origin: ComposerImageOrigin;
+};
+
+const MAX_INLINE_COMPOSER_IMAGES = 8;
 
 type UseComposerPasteAssetOptions = {
   autoUploadPastedAssets: boolean;
@@ -57,29 +70,79 @@ export function useComposerPasteAsset({ autoUploadPastedAssets, selectedAssets, 
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const pasteAsset = useMutation({
-    mutationFn: async (file: File): Promise<PasteAssetResult> => {
+    mutationFn: async ({ file, origin }: ComposerImageMutationInput): Promise<PasteAssetResult> => {
       if (!autoUploadPastedAssets) {
-        return { asset: await temporaryAssetFromFile(file), uploaded: false };
+        return { asset: await temporaryAssetFromFile(file), uploaded: false, origin };
       }
       const form = new FormData();
       form.set("file", file);
-      const result = await api.uploadAsset(form);
-      return { asset: result.asset, uploaded: true };
+      try {
+        const result = await api.uploadAsset(form);
+        return { asset: result.asset, uploaded: true, origin };
+      } catch (error) {
+        if (origin !== "drawing") throw error;
+        const inlineCount = selectedAssets.filter((asset) => asset.temporary || asset.dataUrl).length;
+        if (inlineCount >= MAX_INLINE_COMPOSER_IMAGES) {
+          throw new Error(t("drawing.error.inlineLimit", { count: MAX_INLINE_COMPOSER_IMAGES }));
+        }
+        return {
+          asset: await temporaryAssetFromFile(file),
+          uploaded: false,
+          origin,
+          uploadFallback: true
+        };
+      }
     },
-    onSuccess: (result) => {
-      const nextAssets = selectedAssets.some((asset) => asset.id === result.asset.id)
-        ? selectedAssets
-        : [...selectedAssets, result.asset];
+    onSuccess: (result, input) => {
+      const replaceIndex = input.replaceAssetId
+        ? selectedAssets.findIndex((asset) => asset.id === input.replaceAssetId)
+        : -1;
+      const remainingAssets = selectedAssets.filter((asset) => (
+        asset.id !== input.replaceAssetId && asset.id !== result.asset.id
+      ));
+      const nextAssets = replaceIndex >= 0
+        ? [
+            ...remainingAssets.slice(0, Math.min(replaceIndex, remainingAssets.length)),
+            result.asset,
+            ...remainingAssets.slice(Math.min(replaceIndex, remainingAssets.length))
+          ]
+        : selectedAssets.some((asset) => asset.id === result.asset.id)
+          ? selectedAssets
+          : [...selectedAssets, result.asset];
       setSelectedAssets(nextAssets);
       if (result.uploaded) {
         queryClient.invalidateQueries({ queryKey: ["assets"] });
       }
-      showToast(t("toast.pastedImageAdded"));
+      if (result.origin === "drawing") {
+        showToast(
+          result.uploadFallback ? t("toast.drawingImageAddedFallback") : t("toast.drawingImageAdded"),
+          result.uploadFallback ? "info" : "success"
+        );
+      } else {
+        showToast(t("toast.pastedImageAdded"));
+      }
     },
-    onError: (err) => {
-      showToast(err instanceof ApiError ? err.message : t("toast.pastedImageFailed"), "error");
+    onError: (err, input) => {
+      showToast(
+        err instanceof ApiError
+          ? err.message
+          : input.origin === "drawing"
+            ? t("toast.drawingImageFailed")
+            : t("toast.pastedImageFailed"),
+        "error"
+      );
     }
   });
+
+  const addComposerImage = async (file: File, origin: ComposerImageOrigin, options: AddComposerImageOptions = {}) => {
+    if (origin === "drawing" && !autoUploadPastedAssets) {
+      const inlineCount = selectedAssets.filter((asset) => asset.temporary || asset.dataUrl).length;
+      if (inlineCount >= MAX_INLINE_COMPOSER_IMAGES) {
+        throw new Error(t("drawing.error.inlineLimit", { count: MAX_INLINE_COMPOSER_IMAGES }));
+      }
+    }
+    return pasteAsset.mutateAsync({ file, origin, ...options });
+  };
 
   const handleComposerPaste = (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
     const imageFile = getClipboardImageFile(event.clipboardData);
@@ -89,8 +152,8 @@ export function useComposerPasteAsset({ autoUploadPastedAssets, selectedAssets, 
       showToast(t("toast.pastedImageAdding"));
       return;
     }
-    pasteAsset.mutate(imageFile);
+    pasteAsset.mutate({ file: imageFile, origin: "pasted" });
   };
 
-  return { handleComposerPaste, isPastingAsset: pasteAsset.isPending };
+  return { addComposerImage, handleComposerPaste, isPastingAsset: pasteAsset.isPending };
 }

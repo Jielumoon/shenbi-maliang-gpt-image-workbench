@@ -345,6 +345,7 @@ export type ImageGenerationSettings = {
 
 export type DebugSettings = {
   imageEditMask: boolean;
+  runtimeLogging: boolean;
   updatedAt: string;
 };
 

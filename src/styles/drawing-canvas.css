@@ -1,0 +1,687 @@
+.drawing-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  background: rgba(15, 23, 42, 0.24);
+  backdrop-filter: blur(5px);
+}
+
+.drawing-dialog-backdrop.drawing-dialog-embedded-host {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: block;
+  padding: 0;
+  background: transparent;
+  backdrop-filter: none;
+}
+
+.drawing-dialog {
+  position: relative;
+  width: min(760px, calc(100vw - 24px), calc(100vh - 24px));
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: 1px solid var(--app-border, rgba(148, 163, 184, 0.42));
+  border-radius: 24px;
+  background: var(--app-menu-bg, rgba(255, 255, 255, 0.98));
+  box-shadow: 0 30px 90px rgba(15, 23, 42, 0.28);
+  animation: ui-pop-in 160ms ease both;
+}
+
+.drawing-dialog.drawing-dialog-embedded {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  animation: none;
+}
+
+.drawing-dialog button {
+  font: inherit;
+}
+
+.drawing-close,
+.drawing-history-actions button,
+.drawing-toolbar button,
+.drawing-confirm {
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  color: var(--app-text, #111827);
+  background: transparent;
+  cursor: pointer;
+}
+
+.drawing-close,
+.drawing-history-actions button {
+  color: #111827;
+}
+
+.drawing-close {
+  position: absolute;
+  top: 17px;
+  left: 17px;
+  z-index: 5;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+}
+
+.drawing-close:hover:not(:disabled),
+.drawing-history-actions button:hover:not(:disabled),
+.drawing-toolbar button:hover:not(:disabled) {
+  background: var(--button-default-hover-bg, rgba(15, 23, 42, 0.08));
+}
+
+.drawing-toolbar {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 5px;
+  border: 1px solid var(--app-border, rgba(148, 163, 184, 0.38));
+  border-radius: 999px;
+  background: var(--app-menu-bg, rgba(255, 255, 255, 0.98));
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  transform: translateX(-50%);
+}
+
+.drawing-toolbar > button,
+.drawing-shape-tool > button {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+}
+
+.drawing-toolbar button.active {
+  background: var(--button-default-hover-bg, rgba(15, 23, 42, 0.09));
+}
+
+.drawing-toolbar button:disabled {
+  color: #b6bbc4;
+  background: transparent;
+  opacity: 0.42;
+  cursor: default;
+}
+
+.drawing-shape-tool {
+  position: relative;
+  display: grid;
+}
+
+.drawing-color-tool {
+  position: relative;
+  display: grid;
+}
+
+.drawing-color-tool > button {
+  width: 38px;
+  height: 38px;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  padding: 0;
+  color: var(--app-text, #111827);
+  background: transparent;
+}
+
+.drawing-color-tool > button:hover,
+.drawing-color-tool > button[aria-expanded="true"] {
+  background: var(--button-default-hover-bg, rgba(15, 23, 42, 0.09));
+}
+
+.drawing-color-trigger-dot {
+  width: 21px;
+  height: 21px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 999px;
+  background: var(--drawing-swatch);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.14);
+}
+
+.drawing-color-menu {
+  position: absolute;
+  top: calc(100% + 9px);
+  left: 50%;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(7, 28px);
+  gap: 5px;
+  border: 1px solid var(--app-border, rgba(148, 163, 184, 0.38));
+  border-radius: 14px;
+  padding: 8px;
+  background: var(--app-menu-bg, #ffffff);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.15);
+  transform: translateX(-50%);
+}
+
+.drawing-toolbar .drawing-color-menu .drawing-color-swatch {
+  width: 24px;
+  height: 24px;
+  background: var(--drawing-swatch);
+}
+
+.drawing-toolbar-divider {
+  width: 1px;
+  height: 22px;
+  margin: 0 2px;
+  background: var(--app-border, rgba(148, 163, 184, 0.42));
+}
+
+.drawing-shape-menu {
+  position: absolute;
+  top: calc(100% + 9px);
+  left: 50%;
+  display: grid;
+  grid-template-columns: repeat(5, 34px);
+  gap: 3px;
+  padding: 5px;
+  border: 1px solid var(--app-border, rgba(148, 163, 184, 0.38));
+  border-radius: 12px;
+  background: var(--app-menu-bg, #ffffff);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.15);
+  transform: translateX(-50%);
+}
+
+.drawing-shape-menu button {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+}
+
+.drawing-history-actions {
+  position: absolute;
+  top: 17px;
+  right: 18px;
+  z-index: 5;
+  display: flex;
+  gap: 6px;
+}
+
+.drawing-history-actions button {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+}
+
+.drawing-close:disabled,
+.drawing-history-actions button:disabled {
+  opacity: 0.34;
+  cursor: default;
+}
+
+.drawing-size-control {
+  position: absolute;
+  top: 50%;
+  left: 14px;
+  z-index: 5;
+  width: 28px;
+  height: 210px;
+  display: grid;
+  place-items: center;
+  border: 0 !important;
+  outline: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  transform: translateY(-50%);
+}
+
+.drawing-size-rail {
+  position: absolute;
+  inset-block: 0;
+  left: 50%;
+  width: 4px;
+  overflow: visible;
+  border: 0;
+  border-radius: 999px;
+  background: #d1d5db;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.drawing-size-fill {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: var(--drawing-size-progress);
+  border-radius: inherit;
+  background: #2563eb;
+}
+
+.drawing-size-thumb {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(0px, calc(var(--drawing-size-progress) - 8px), calc(100% - 16px));
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 999px;
+  background: #2563eb;
+  box-shadow: none;
+  transform: translateX(-50%);
+}
+
+.drawing-size-control input {
+  position: absolute;
+  z-index: 2;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  width: 210px;
+  height: 28px;
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  outline: 0 !important;
+  background: transparent !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+  opacity: 0;
+  cursor: grab;
+  transform: rotate(-90deg);
+}
+
+.drawing-size-control input:active {
+  cursor: grabbing;
+}
+
+.drawing-canvas-shell {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  background: #ffffff;
+}
+
+.drawing-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #ffffff;
+  outline: none;
+  touch-action: none;
+  user-select: none;
+}
+
+.drawing-dialog-embedded .drawing-canvas-shell,
+.drawing-dialog-embedded .drawing-canvas {
+  border-radius: 0;
+  background: transparent;
+}
+
+.image-editor-topbar > .drawing-toolbar-embedded {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  z-index: 22;
+  box-sizing: border-box;
+  height: 50px;
+  margin-block: auto;
+  white-space: nowrap;
+  transform: translateX(-50%) translateY(0.5px);
+}
+
+.image-editor-viewport > .drawing-size-control-embedded {
+  left: 18px;
+  z-index: 12;
+  height: min(210px, calc(100% - 48px));
+}
+
+.drawing-canvas-shell.tool-shape .drawing-canvas {
+  cursor: crosshair;
+}
+
+.drawing-canvas-shell.tool-brush .drawing-canvas,
+.drawing-canvas-shell.tool-eraser .drawing-canvas {
+  cursor: none;
+}
+
+.drawing-canvas-shell.tool-text .drawing-canvas {
+  cursor: text;
+}
+
+.drawing-canvas-shell.tool-select .drawing-canvas {
+  cursor: default;
+}
+
+.drawing-canvas-shell.tool-select.cursor-move .drawing-canvas {
+  cursor: grab;
+}
+
+.drawing-canvas-shell.tool-select:is(.resize-e, .resize-w) .drawing-canvas {
+  cursor: ew-resize;
+}
+
+.drawing-canvas-shell.tool-select:is(.resize-n, .resize-s) .drawing-canvas {
+  cursor: ns-resize;
+}
+
+.drawing-canvas-shell.tool-select:is(.resize-nw, .resize-se) .drawing-canvas {
+  cursor: nwse-resize;
+}
+
+.drawing-canvas-shell.tool-select:is(.resize-ne, .resize-sw) .drawing-canvas {
+  cursor: nesw-resize;
+}
+
+.drawing-canvas-shell.tool-select.cursor-move .drawing-canvas:active {
+  cursor: grabbing;
+}
+
+.drawing-tool-cursor {
+  position: absolute;
+  z-index: 7;
+  display: block;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  background: var(--drawing-tool-cursor-color, #000000);
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.92), 0 3px 10px rgba(15, 23, 42, 0.18);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  transition: opacity 80ms ease;
+}
+
+.drawing-tool-cursor.is-eraser {
+  border: 1px solid rgba(15, 23, 42, 0.84);
+  background: transparent;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.84);
+}
+
+.drawing-text-draft-frame {
+  position: absolute;
+  z-index: 8;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.drawing-text-editor,
+.drawing-text-content {
+  position: absolute;
+  inset-inline: var(--drawing-text-inline-padding, 0px);
+  top: 50%;
+  display: block;
+  height: 1em;
+  overflow: hidden;
+  color: inherit;
+  background: transparent;
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-weight: 400;
+  line-height: 1;
+  text-align: left;
+  white-space: pre;
+  transform: translateY(-50%);
+}
+
+.drawing-text-editor {
+  min-width: 0;
+  border: 0 !important;
+  border-radius: 0 !important;
+  outline: 0 !important;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: #2563eb;
+  padding: 0 !important;
+  box-shadow: none !important;
+  appearance: none;
+}
+
+.drawing-text-editor::selection {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  background: rgba(37, 99, 235, 0.2);
+}
+
+.drawing-text-draft-value {
+  pointer-events: none;
+}
+
+.drawing-text-draft-value.is-placeholder {
+  color: rgba(107, 114, 128, 0.72);
+}
+
+.drawing-text-draft-handle {
+  position: absolute;
+  z-index: 2;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  background: transparent;
+  pointer-events: auto;
+  transform: translate(-50%, -50%);
+}
+
+.drawing-text-draft-handle:is(.is-e, .is-w) { cursor: ew-resize; }
+.drawing-text-draft-handle:is(.is-n, .is-s) { cursor: ns-resize; }
+.drawing-text-draft-handle:is(.is-nw, .is-se) { cursor: nwse-resize; }
+.drawing-text-draft-handle:is(.is-ne, .is-sw) { cursor: nesw-resize; }
+
+.drawing-text-draft-handle.is-nw { top: 0; left: 0; }
+.drawing-text-draft-handle.is-n { top: 0; left: 50%; }
+.drawing-text-draft-handle.is-ne { top: 0; left: 100%; }
+.drawing-text-draft-handle.is-e { top: 50%; left: 100%; }
+.drawing-text-draft-handle.is-se { top: 100%; left: 100%; }
+.drawing-text-draft-handle.is-s { top: 100%; left: 50%; }
+.drawing-text-draft-handle.is-sw { top: 100%; left: 0; }
+.drawing-text-draft-handle.is-w { top: 50%; left: 0; }
+
+.drawing-color-palette {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: calc(100% - 150px);
+  overflow-x: auto;
+  padding: 6px 8px;
+  scrollbar-width: none;
+  transform: translateX(-50%);
+}
+
+.drawing-color-palette::-webkit-scrollbar {
+  display: none;
+}
+
+.drawing-color-swatch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--drawing-swatch);
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08);
+  cursor: pointer;
+}
+
+.drawing-color-swatch.active {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 2px #2563eb;
+}
+
+.drawing-color-swatch.custom {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: 0;
+}
+
+.drawing-color-swatch.custom span {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: conic-gradient(#ef4444, #f59e0b, #22c55e, #06b6d4, #3b82f6, #8b5cf6, #ec4899, #ef4444);
+}
+
+.drawing-color-swatch.custom input {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.drawing-confirm {
+  position: absolute;
+  right: 17px;
+  bottom: 17px;
+  z-index: 7;
+  width: 46px;
+  height: 46px;
+  border-radius: 999px;
+  color: #ffffff;
+  background: #3b82f6;
+  box-shadow: 0 8px 24px rgba(59, 130, 246, 0.28);
+}
+
+.drawing-confirm:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+.drawing-confirm:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.drawing-confirm-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.38);
+  border-top-color: #ffffff;
+  border-radius: 999px;
+  animation: drawing-spin 700ms linear infinite;
+}
+
+.drawing-error {
+  position: absolute;
+  left: 50%;
+  bottom: 58px;
+  z-index: 7;
+  max-width: min(520px, calc(100% - 160px));
+  border-radius: 999px;
+  color: #b91c1c;
+  background: rgba(254, 226, 226, 0.96);
+  padding: 7px 13px;
+  font-size: 13px;
+  text-align: center;
+  transform: translateX(-50%);
+}
+
+@keyframes drawing-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 720px), (max-height: 720px) {
+  .drawing-dialog-backdrop {
+    padding: 6px;
+  }
+
+  .drawing-dialog {
+    width: min(calc(100vw - 12px), calc(100vh - 12px));
+    border-radius: 18px;
+  }
+
+  .drawing-toolbar {
+    top: 7px;
+  }
+
+  .drawing-toolbar > button,
+  .drawing-shape-tool > button,
+  .drawing-color-tool > button {
+    width: 34px;
+    height: 34px;
+  }
+
+  .drawing-close {
+    top: 9px;
+    left: 8px;
+  }
+
+  .drawing-history-actions {
+    top: 10px;
+    right: 9px;
+    gap: 2px;
+  }
+
+  .drawing-size-control {
+    left: 2px;
+    height: 150px;
+  }
+
+  .drawing-size-control input {
+    width: 150px;
+  }
+
+  .drawing-color-palette {
+    bottom: 7px;
+    gap: 5px;
+    max-width: calc(100% - 112px);
+    padding-inline: 5px;
+  }
+
+  .drawing-color-swatch {
+    width: 21px;
+    height: 21px;
+  }
+
+  .drawing-confirm {
+    right: 10px;
+    bottom: 9px;
+    width: 40px;
+    height: 40px;
+  }
+}
+
+@media (max-width: 520px) {
+  .drawing-toolbar {
+    left: 52%;
+  }
+
+  .drawing-toolbar > button,
+  .drawing-shape-tool > button,
+  .drawing-color-tool > button {
+    width: 31px;
+    height: 31px;
+  }
+
+  .drawing-toolbar svg {
+    width: 17px;
+    height: 17px;
+  }
+
+  .drawing-history-actions {
+    top: 47px;
+  }
+
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawing-dialog,
+  .drawing-confirm-spinner {
+    animation: none;
+  }
+}

@@ -23,6 +23,12 @@ import type {
   ProviderRequestLog,
   ProxyConfig,
   RegistrationSettings,
+  RuntimeLogEntry,
+  RuntimeLogFile,
+  RuntimeLogLevel,
+  RuntimeLogRawChunk,
+  RuntimeLogSource,
+  RuntimeLogStatus,
   SafetyReviewLog,
   SafetyReviewSettings,
   ExternalMcpSettings,
@@ -201,6 +207,22 @@ export type PromptOptimizerProviderModelsResult = {
 export type PromptOptimizerProviderTestResult = PromptOptimizerProviderModelsResult & {
   ok: boolean;
   message: string;
+};
+
+export type ProviderModelsResult = {
+  endpoint: string;
+  durationMs: number;
+  models: string[];
+  imageModels: string[];
+  responsesModels: string[];
+};
+
+export type RuntimeLogsResult = {
+  files: RuntimeLogFile[];
+  selectedFile: string;
+  entries: RuntimeLogEntry[];
+  truncated: boolean;
+  status: RuntimeLogStatus;
 };
 
 export const configApi = {
@@ -515,6 +537,11 @@ export const configApi = {
       body: JSON.stringify(imageMode)
     }),
   providers: () => request<{ providers: ProviderConfig[] }>("/api/config/providers"),
+  providerModels: (provider: ProviderConfig) =>
+    request<ProviderModelsResult>("/api/config/providers/models", {
+      method: "POST",
+      body: JSON.stringify(provider)
+    }),
   saveProviders: (providers: ProviderConfig[]) =>
     request<{ ok: boolean }>("/api/config/providers", {
       method: "PUT",
@@ -571,12 +598,29 @@ export const configApi = {
       method: "PUT",
       body: JSON.stringify(proxy)
     }),
-  debug: () => request<{ debug: DebugSettings }>("/api/config/debug"),
+  debug: () => request<{ debug: DebugSettings; runtimeLog: RuntimeLogStatus }>("/api/config/debug"),
   saveDebug: (debug: DebugSettings) =>
-    request<{ debug: DebugSettings }>("/api/config/debug", {
+    request<{ debug: DebugSettings; runtimeLog: RuntimeLogStatus }>("/api/config/debug", {
       method: "PUT",
       body: JSON.stringify(debug)
     }),
+  runtimeLogs: (filters: { file?: string; level?: RuntimeLogLevel | "all"; source?: RuntimeLogSource | "all"; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (filters.file) params.set("file", filters.file);
+    if (filters.level && filters.level !== "all") params.set("level", filters.level);
+    if (filters.source && filters.source !== "all") params.set("source", filters.source);
+    if (filters.limit) params.set("limit", String(filters.limit));
+    const query = params.toString();
+    return request<RuntimeLogsResult>(`/api/config/runtime-logs${query ? `?${query}` : ""}`);
+  },
+  runtimeLogDownloadUrl: (file: string) => `/api/config/runtime-logs/download?file=${encodeURIComponent(file)}`,
+  runtimeLogRaw: (file: string, before?: number) => {
+    const params = new URLSearchParams({ file });
+    if (before != null) params.set("before", String(before));
+    return request<RuntimeLogRawChunk>(`/api/config/runtime-logs/raw?${params.toString()}`);
+  },
+  openRuntimeLogDirectory: () =>
+    request<{ ok: boolean; directory: string }>("/api/config/runtime-logs/open-directory", { method: "POST" }),
   requestLogs: (filters: { limit?: number; offset?: number } = {}) => {
     const params = new URLSearchParams();
     if (filters.limit) params.set("limit", String(filters.limit));

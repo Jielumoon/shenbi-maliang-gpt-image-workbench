@@ -59,7 +59,7 @@ function providerModelBaseName(model: string) {
 
 function isGptImage2ProviderModel(model: string) {
   const base = providerModelBaseName(model);
-  return base === DEFAULT_IMAGE_MODEL || base === "codex-gpt-image-2" || base.startsWith(`${DEFAULT_IMAGE_MODEL}-`);
+  return base === "codex-gpt-image-2" || /^gpt-image-2(?:$|[.-])/.test(base);
 }
 
 function parseProviderSizeList(value: string) {
@@ -2139,7 +2139,7 @@ export function initConfigDb() {
       edit_path text not null,
       responses_path text not null default '/v1/responses',
       model text not null,
-      responses_model text not null default 'gpt-5.5',
+      responses_model text not null default 'gpt-6-astra',
       sizes text not null,
       qualities text not null,
       default_size text not null,
@@ -2350,7 +2350,7 @@ export function initConfigDb() {
     ["channel", "text not null default 'api'"],
     ["route_mode", "text not null default 'images_api'"],
     ["responses_path", "text not null default '/v1/responses'"],
-    ["responses_model", "text not null default 'gpt-5.5'"],
+    ["responses_model", "text not null default 'gpt-6-astra'"],
     ["proxy_enabled", "integer not null default 0"],
     ["quota_mode", "text not null default 'codex_first'"],
     ["fallback_to_conversation", "integer not null default 1"],
@@ -2909,7 +2909,7 @@ export function seedProvider() {
       "/v1/images/generations",
       "/v1/images/edits",
       "/v1/responses",
-      "gpt-image-2",
+      DEFAULT_IMAGE_MODEL,
       DEFAULT_RESPONSES_MODEL,
       JSON.stringify(DEFAULT_IMAGE_SIZES),
       JSON.stringify(["low", "medium", "high"]),

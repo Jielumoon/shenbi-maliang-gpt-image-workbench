@@ -278,7 +278,8 @@ export type GlobalSwitchType =
   | "cpa_sync"
   | "github_entry"
   | "ai_client_install_entry"
-  | "debug_image_edit_mask";
+  | "debug_image_edit_mask"
+  | "debug_runtime_logging";
 
 export type GlobalSwitchSetting = {
   type: GlobalSwitchType;
@@ -385,7 +386,63 @@ export type ImageGenerationMode = {
 
 export type DebugSettings = {
   imageEditMask: boolean;
+  runtimeLogging: boolean;
   updatedAt: string;
+};
+
+export type RuntimeLogLevel = "info" | "warn" | "error" | "fatal";
+
+export type RuntimeLogSource = "server" | "http" | "client";
+
+export type RuntimeLogEntry = {
+  id: string;
+  timestamp: string;
+  level: RuntimeLogLevel;
+  source: RuntimeLogSource;
+  event: string;
+  message: string;
+  stack?: string;
+  requestId?: string;
+  method?: string;
+  path?: string;
+  status?: number;
+  durationMs?: number;
+  userId?: string;
+  details?: Record<string, unknown>;
+  pid: number;
+  version: string;
+  platform: string;
+  uptimeMs: number;
+};
+
+export type RuntimeLogFile = {
+  name: string;
+  date: string;
+  size: number;
+  updatedAt: string;
+};
+
+export type RuntimeLogStatus = {
+  enabled: boolean;
+  healthy: boolean;
+  directory: string;
+  absoluteDirectory: string;
+  retentionDays: number;
+  maximumFileBytes: number;
+  maximumTotalBytes: number;
+  currentFile: string;
+  lastWriteAt: string;
+  lastError: string;
+};
+
+export type RuntimeLogRawChunk = {
+  file: string;
+  content: string;
+  start: number;
+  end: number;
+  size: number;
+  hasEarlier: boolean;
+  hasLater: boolean;
 };
 
 export type ImageAccount = {

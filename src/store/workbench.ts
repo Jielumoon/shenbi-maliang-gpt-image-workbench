@@ -1,5 +1,13 @@
 import { create } from "zustand";
 import { normalizeImageBackgroundOption, type ImageBackgroundOption } from "../lib/imageBackground";
+import {
+  DEFAULT_GENERATION_IMAGE_MODEL,
+  DEFAULT_IMAGE_QUALITY,
+  normalizeImageModel,
+  normalizeImageQuality,
+  type ImageModelId,
+  type ImageQuality
+} from "../lib/imageModels";
 import type { PromptTemplateOptimizeStyle } from "../lib/promptOptimizeStyles";
 import type { AssetItem, CaseMaterialItem, Message, WorkImage } from "../types";
 import type { PromptTemplateFormValues, PromptTemplateResult } from "../types";
@@ -31,6 +39,8 @@ export type ImageEditorOpenRequest = {
   libraryContinuations?: ImageLibraryContinuations;
   initialPrompt?: string;
   initialImageCount?: number;
+  initialImageModel?: ImageModelId;
+  initialQuality?: ImageQuality;
   preserveSelectedAssets?: boolean;
   persistAcrossSessionChange?: boolean;
   discardDraftOnClose?: boolean;
@@ -44,6 +54,8 @@ export type PendingEditorCancellationReturn = {
   imageCount: number;
   size: string;
   background: ImageBackgroundOption;
+  imageModel: ImageModelId;
+  quality: ImageQuality;
   promptInputOptimizeStyle: PromptTemplateOptimizeStyle;
   promptColorSchemeIds: string[];
   promptColorSchemeInjection: string;
@@ -81,6 +93,8 @@ export type ComposerSessionDraft = {
   imageCount: number;
   size: string;
   background: ImageBackgroundOption;
+  imageModel: ImageModelId;
+  quality: ImageQuality;
   promptInputOptimizeStyle: PromptTemplateOptimizeStyle;
   promptColorSchemeIds: string[];
   promptColorSchemeId: string;
@@ -163,6 +177,8 @@ function emptyComposerDraft(): ComposerSessionDraft {
     imageCount: 1,
     size: "",
     background: "auto",
+    imageModel: DEFAULT_GENERATION_IMAGE_MODEL,
+    quality: DEFAULT_IMAGE_QUALITY,
     promptInputOptimizeStyle: "standard",
     promptColorSchemeIds: [],
     promptColorSchemeId: "",
@@ -176,7 +192,7 @@ function normalizeComposerDraft(value: unknown): ComposerSessionDraft {
     ...emptyComposerDraft(),
     ...(value && typeof value === "object" && !Array.isArray(value) ? value as Partial<ComposerSessionDraft> : {})
   };
-  delete (draft as ComposerSessionDraft & { quality?: unknown }).quality;
+  const imageModel = normalizeImageModel(draft.imageModel, DEFAULT_GENERATION_IMAGE_MODEL);
   const rawIds = Array.isArray(draft.promptColorSchemeIds)
     ? draft.promptColorSchemeIds
     : String(draft.promptColorSchemeId || "")
@@ -187,6 +203,8 @@ function normalizeComposerDraft(value: unknown): ComposerSessionDraft {
   return {
     ...draft,
     background: normalizeImageBackgroundOption(draft.background),
+    imageModel,
+    quality: normalizeImageQuality(imageModel, draft.quality),
     promptColorSchemeIds,
     promptColorSchemeId: String(promptColorSchemeIds[0] || ""),
     promptColorSchemeInjection: String(draft.promptColorSchemeInjection || "")
@@ -202,6 +220,8 @@ function hasComposerDraftContent(draft: ComposerSessionDraft) {
     || draft.imageCount !== 1
     || draft.size
     || draft.background !== "auto"
+    || draft.imageModel !== DEFAULT_GENERATION_IMAGE_MODEL
+    || draft.quality !== DEFAULT_IMAGE_QUALITY
     || draft.promptInputOptimizeStyle !== "standard"
     || draft.promptColorSchemeIds.length > 0
     || draft.promptColorSchemeInjection.trim()

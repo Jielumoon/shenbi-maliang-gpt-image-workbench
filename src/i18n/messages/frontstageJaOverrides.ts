@@ -299,7 +299,7 @@ export const frontstageJaOverrides: Messages = {
   "chatMessages.unknownTime": "時刻不明",
   "chatMessages.todayTime": "今日 {time}",
   "chatMessages.dateTime": "{date} {time}",
-  "chatMessages.messageTime": "メッセージ時刻",
+  "chatMessages.messageTime": "時刻",
   "chatMessages.originalMaterials": "元の素材",
   "chatMessages.copy": "コピー",
   "chatMessages.editMessage": "メッセージを編集",

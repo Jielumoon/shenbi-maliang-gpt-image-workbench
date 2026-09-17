@@ -6,6 +6,7 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { serveStatic } from "hono/bun";
 import {
   CONFIG_COOKIE,
+  DEFAULT_IMAGE_MODEL,
   DEFAULT_IMAGE_SIZES,
   DEFAULT_RESPONSES_MODEL,
   IMAGE_JOB_RUNNING_TIMEOUT_MS,
@@ -26,7 +27,7 @@ import {
   reorderManagedContentCategories
 } from "./categoryManagement";
 import { appDb, configDb, getAll, getOne, run } from "./db";
-import { globalSwitches, saveGlobalSwitch, type GlobalSwitchType } from "./globalSwitches";
+import { globalSwitchEnabled, globalSwitches, saveGlobalSwitch, type GlobalSwitchType } from "./globalSwitches";
 import { mimeTypeFromPath } from "./imageFiles";
 import { loginAssetFile } from "./loginAssets";
 import {
@@ -88,6 +89,7 @@ import { registerExternalMcpProtocolRoute } from "./externalMcpServer";
 import { registerExternalMcpUploadRoutes } from "./externalMcpUploads";
 import { registerExternalMcpResultRoutes } from "./externalMcpResults";
 import { registerImageRoutes, startInterruptedImageJobRecovery } from "./imageRoutes";
+import { registerImageProvenanceRoutes } from "./imageProvenanceRoutes";
 import {
   migrateEncryptedImageTaskSounds,
   migrateLegacyImageTaskSounds,
@@ -96,6 +98,7 @@ import {
 import { invalidateLibraryFacetCache, registerLibraryRoutes } from "./libraryRoutes";
 import { registerLanguageModelAssignmentRoutes } from "./languageModelAssignments";
 import { registerPromptOptimizerRoutes } from "./promptOptimizerRoutes";
+import { fetchProviderModelCatalog } from "./providerModels";
 import { registerPromptColorSchemeRoutes } from "./promptColorSchemeRoutes";
 import { registerPromptReferenceLinkRoutes } from "./promptReferenceLinkRoutes";
 import { registerPromptTemplateRoutes } from "./promptTemplateRoutes";
@@ -117,9 +120,19 @@ import { registrationSettings, saveRegistrationSettings } from "./registrationSe
 import { deleteUserAccount } from "./userDeletion";
 import { registerInternalDistributionRoutes } from "./internalDistributionRoutes";
 import { registerSiteSettingsRoutes } from "./siteSettingsRoutes";
+import { registerRuntimeLogRoutes } from "./runtimeLogRoutes";
+import { resolveDebugSettingsUpdate } from "./debugSettings";
+import {
+  initializeRuntimeLogging,
+  runtimeLog,
+  runtimeLogErrorWithConsole,
+  runtimeLogStore,
+  runtimeRequestId
+} from "./runtimeLogger";
 
 initAppDb();
 initConfigDb();
+initializeRuntimeLogging(globalSwitchEnabled("debug_runtime_logging"));
 seedPromptReferenceLinks();
 seedCases();
 seedPromptTemplates();
@@ -291,10 +304,20 @@ function assertGlobalSwitchCanEnable(type: GlobalSwitchType, enabled: boolean) {
     if (!account.syncUrl) throw new Error("启用 CPA 同步必须填写管理地址");
     if (!account.passwordSecret) throw new Error("启用 CPA 同步必须填写访问密码");
   }
+  if (type === "debug_runtime_logging") runtimeLogStore.prepare();
 }
 
 api.onError((error, c) => {
-  console.error("API 请求失败", error);
+  runtimeLogErrorWithConsole({
+    source: "http",
+    event: "http.unhandled_error",
+    message: apiErrorMessage(error),
+    stack: error instanceof Error ? error.stack : undefined,
+    requestId: runtimeRequestId(c.req.raw),
+    method: c.req.method,
+    path: c.req.path,
+    status: 500
+  }, "API 请求失败", error);
   return c.json({ error: apiErrorMessage(error) }, 500);
 });
 
@@ -307,6 +330,8 @@ registerSessionShareRoutes(api);
 registerBrandingRoutes(api);
 
 registerSiteSettingsRoutes(api);
+
+registerRuntimeLogRoutes(api);
 
 registerExternalMcpSettingsRoutes(api);
 
@@ -322,6 +347,8 @@ registerPromptColorSchemeRoutes(api);
 registerPromptTemplateRoutes(api);
 
 registerImageRoutes(api);
+
+registerImageProvenanceRoutes(api);
 
 registerImageTaskSoundRoutes(api);
 
@@ -434,6 +461,7 @@ api.put("/config/global-switches/:type", async (c) => {
   if (setting.type === "github_entry" || setting.type === "ai_client_install_entry") invalidatePublicBrandingCache();
   if (setting.type === "asset_review") invalidateLibraryFacetCache("assets");
   if (setting.type === "case_review") invalidateLibraryFacetCache("cases");
+  if (setting.type === "debug_runtime_logging") runtimeLogStore.setEnabled(setting.enabled);
   audit("global_switch.save", { type: setting.type, enabled: setting.enabled });
   return c.json({ switch: setting, switches: globalSwitches() });
 });
@@ -2061,6 +2089,92 @@ function normalizeProviderConfigPath(channel: string, value: unknown, kind: "gen
   return path || "/v1/images/generations";
 }
 
+function providerForModelDiscovery(raw: Record<string, unknown>) {
+  const id = String(raw.id ?? "").trim();
+  const existing = id ? getOne<ProviderRow>(configDb, "select * from provider_configs where id = ?", id) : null;
+  const channel = normalizeProviderChannel(String(raw.channel ?? existing?.channel ?? inferChannelFromType(String(raw.type ?? existing?.type ?? "api"))));
+  const incomingApiKey = String(raw.apiKeyValue ?? "");
+  const apiKeyValue = incomingApiKey.includes("****")
+    ? existing?.api_key_value ?? ""
+    : incomingApiKey;
+  const incomingCookies = String(raw.webCookies ?? "");
+  const webCookies = incomingCookies.includes("****")
+    ? existing?.web_cookies ?? ""
+    : incomingCookies;
+  const webAccountIds = Object.prototype.hasOwnProperty.call(raw, "webAccountIds")
+    ? normalizeIdList(raw.webAccountIds)
+    : normalizeIdList(existing?.web_account_ids);
+  const timestamp = now();
+  const provider: ProviderRow = {
+    id: id || existing?.id || "provider-model-discovery",
+    name: String(raw.name ?? existing?.name ?? "图片渠道").trim() || "图片渠道",
+    type: String(raw.type ?? existing?.type ?? "openai-compatible"),
+    channel,
+    enabled: Boolean(raw.enabled ?? existing?.enabled ?? true) ? 1 : 0,
+    base_url: String(raw.baseUrl ?? existing?.base_url ?? "").trim(),
+    api_key_env: String(raw.apiKeyEnv ?? existing?.api_key_env ?? "").trim(),
+    api_key_value: apiKeyValue,
+    route_mode: normalizeRouteMode(String(raw.routeMode ?? existing?.route_mode ?? "images_api")),
+    generation_path: normalizeProviderConfigPath(channel, raw.generationPath ?? existing?.generation_path, "generation"),
+    edit_path: normalizeProviderConfigPath(channel, raw.editPath ?? existing?.edit_path, "edit"),
+    responses_path: normalizeProviderConfigPath(channel, raw.responsesPath ?? existing?.responses_path, "responses"),
+    model: String(raw.model ?? existing?.model ?? DEFAULT_IMAGE_MODEL).trim() || DEFAULT_IMAGE_MODEL,
+    responses_model: String(raw.responsesModel ?? existing?.responses_model ?? DEFAULT_RESPONSES_MODEL).trim() || DEFAULT_RESPONSES_MODEL,
+    sizes: JSON.stringify(Array.isArray(raw.sizes) ? raw.sizes.map(String) : []),
+    qualities: JSON.stringify(Array.isArray(raw.qualities) ? raw.qualities.map(String) : []),
+    default_size: String(raw.defaultSize ?? existing?.default_size ?? "auto"),
+    default_quality: String(raw.defaultQuality ?? existing?.default_quality ?? "auto"),
+    response_image_path: String(raw.responseImagePath ?? existing?.response_image_path ?? "data[0].b64_json"),
+    proxy_enabled: Boolean(raw.proxyEnabled ?? existing?.proxy_enabled) ? 1 : 0,
+    quota_mode: normalizeQuotaMode(String(raw.quotaMode ?? existing?.quota_mode ?? "codex_first")),
+    fallback_to_conversation: 0,
+    web_account_id: String(raw.webAccountId ?? existing?.web_account_id ?? ""),
+    web_account_ids: JSON.stringify(webAccountIds),
+    web_account_mode: normalizeWebAccountMode(String(raw.webAccountMode ?? existing?.web_account_mode ?? "priority")),
+    web_cookies: webCookies,
+    created_at: existing?.created_at ?? timestamp,
+    updated_at: timestamp
+  };
+
+  if (channel !== "chatgpt_web") return provider;
+  for (const accountId of webAccountIds) {
+    const account = getOne<ImageAccountRow>(configDb, "select * from image_accounts where id = ?", accountId);
+    if (!account) continue;
+    const authMeta = account.auth_json ? extractAuthJsonMeta(account.auth_json) : { accessToken: "", cookies: "", accountId: "" };
+    const infoMeta = account.auth_info_json ? extractAuthJsonMeta(account.auth_info_json) : { accessToken: "", cookies: "", accountId: "" };
+    const accessToken = account.access_token || authMeta.accessToken || infoMeta.accessToken || "";
+    if (!accessToken) continue;
+    provider.api_key_value = accessToken;
+    provider.web_account_id = authMeta.accountId || infoMeta.accountId || provider.web_account_id;
+    provider.web_cookies = authMeta.cookies || infoMeta.cookies || provider.web_cookies;
+    break;
+  }
+  return provider;
+}
+
+api.post("/config/providers/models", async (c) => {
+  const blocked = requireConfig(c);
+  if (blocked) return blocked;
+  const raw = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+  try {
+    const provider = providerForModelDiscovery(raw);
+    const result = await fetchProviderModelCatalog(provider);
+    audit("provider.models", {
+      id: provider.id,
+      name: provider.name,
+      channel: provider.channel,
+      count: result.models.length,
+      imageModelCount: result.imageModels.length,
+      responsesModelCount: result.responsesModels.length,
+      endpoint: result.endpoint,
+      durationMs: result.durationMs
+    });
+    return c.json(result);
+  } catch (error) {
+    return c.json({ error: apiErrorMessage(error, "模型列表获取失败") }, 400);
+  }
+});
+
 api.put("/config/providers", async (c) => {
   const blocked = requireConfig(c);
   if (blocked) return blocked;
@@ -3224,13 +3338,16 @@ api.put("/config/proxy", async (c) => {
 api.get("/config/debug", (c) => {
   const blocked = requireConfig(c);
   if (blocked) return blocked;
-  return c.json({ debug: debugSettings() });
+  return c.json({ debug: debugSettings(), runtimeLog: runtimeLogStore.status() });
 });
 
 api.put("/config/debug", async (c) => {
   const blocked = requireConfig(c);
   if (blocked) return blocked;
   const body = await c.req.json().catch(() => ({}));
+  const current = debugSettings();
+  const { imageEditMask, runtimeLogging } = resolveDebugSettingsUpdate(body, current);
+  if (runtimeLogging && !current.runtimeLogging) runtimeLogStore.prepare();
   const timestamp = now();
   run(
     configDb,
@@ -3241,15 +3358,18 @@ api.put("/config/debug", async (c) => {
       image_edit_mask = excluded.image_edit_mask,
       updated_at = excluded.updated_at`,
     "default",
-    Boolean(body.imageEditMask) ? 1 : 0,
+    imageEditMask ? 1 : 0,
     0,
     timestamp
   );
-  saveGlobalSwitch("debug_image_edit_mask", Boolean(body.imageEditMask));
+  saveGlobalSwitch("debug_image_edit_mask", imageEditMask);
+  saveGlobalSwitch("debug_runtime_logging", runtimeLogging);
+  runtimeLogStore.setEnabled(runtimeLogging);
   audit("debug.save", {
-    imageEditMask: Boolean(body.imageEditMask)
+    imageEditMask,
+    runtimeLogging
   });
-  return c.json({ debug: debugSettings() });
+  return c.json({ debug: debugSettings(), runtimeLog: runtimeLogStore.status() });
 });
 
 api.get("/config/cpa", (c) => {
@@ -3349,6 +3469,45 @@ api.get("/config/audit", (c) => {
 });
 
 const app = new Hono();
+app.onError((error, c) => {
+  runtimeLogErrorWithConsole({
+    source: "http",
+    event: "http.root_unhandled_error",
+    message: apiErrorMessage(error),
+    stack: error instanceof Error ? error.stack : undefined,
+    requestId: runtimeRequestId(c.req.raw),
+    method: c.req.method,
+    path: c.req.path,
+    status: 500
+  }, "应用请求失败", error);
+  return c.text("Internal Server Error", 500);
+});
+app.use("/api/*", async (c, next) => {
+  const requestId = runtimeRequestId(c.req.raw);
+  const startedAt = performance.now();
+  try {
+    await next();
+  } finally {
+    c.header("X-Request-Id", requestId);
+    const durationMs = performance.now() - startedAt;
+    const contentType = String(c.res.headers.get("content-type") ?? "").toLowerCase();
+    const disposition = String(c.res.headers.get("content-disposition") ?? "").toLowerCase();
+    const intentionallyLongLived = contentType.includes("text/event-stream") || disposition.includes("attachment");
+    if (c.res.status >= 500 || (durationMs >= 30_000 && !intentionallyLongLived)) {
+      runtimeLog({
+        level: c.res.status >= 500 ? "error" : "warn",
+        source: "http",
+        event: c.res.status >= 500 ? "http.server_error" : "http.slow_request",
+        message: c.res.status >= 500 ? `API 请求返回 ${c.res.status}` : "API 请求耗时超过 30 秒",
+        requestId,
+        method: c.req.method,
+        path: c.req.path,
+        status: c.res.status,
+        durationMs
+      });
+    }
+  }
+});
 registerExternalMcpOAuthRoutes(app, api);
 registerExternalMcpUploadRoutes(app);
 registerExternalMcpResultRoutes(app);
@@ -3416,6 +3575,14 @@ const server = Bun.serve({
   }
 });
 (globalThis as typeof globalThis & { __gptImageServer?: typeof server }).__gptImageServer = server;
+
+runtimeLog({
+  level: "info",
+  source: "server",
+  event: "server.started",
+  message: `GPT Image Workbench 已启动，监听 ${displayHost}:${port}`,
+  details: { hostname, port, trustProxy }
+});
 
 startInterruptedImageJobRecovery();
 startStarterCopyScheduler();

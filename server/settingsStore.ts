@@ -77,6 +77,7 @@ export function debugSettings(): DebugSettings {
 
   return {
     imageEditMask: globalSwitchEnabled("debug_image_edit_mask"),
+    runtimeLogging: globalSwitchEnabled("debug_runtime_logging"),
     updatedAt: row?.updated_at ?? ""
   };
 }
